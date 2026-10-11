@@ -54,6 +54,7 @@
       <label>测试模型<select id="model" aria-label="测试模型"></select></label>
       <label>测试题<select id="prompt" aria-label="测试题"></select></label>
       <button id="run" class="primary"><i data-icon="Play"></i><span>运行所选题目</span></button>
+      <button id="cancelTest" class="icon-button" aria-label="取消当前质量检测" data-tooltip="取消当前质量检测" data-icon="X" hidden></button>
     </div>
     <p id="testStatus" class="inline-state" role="status"></p>
     <div class="answer-heading"><h2>模型回答</h2><div class="answer-tools"><label><span class="sr-only">回答记录</span><select id="testRecord" aria-label="回答记录"></select></label><button id="copyAnswer" class="icon-button" aria-label="复制回答" data-tooltip="复制回答" data-icon="Copy" disabled></button><a id="downloadAnswer" class="icon-button" aria-label="下载回答" title="下载回答" hidden><i data-icon="Download"></i></a></div></div>
@@ -89,8 +90,12 @@
     <div class="history-controls">
       <label>模型<select id="historyModel" aria-label="记录模型"><option value="">全部模型</option></select></label>
       <label>结果<select id="historyVerdict" aria-label="记录结果"><option value="">全部结果</option><option value="passed">通过</option><option value="failed">未通过</option><option value="unavailable">不可用</option><option value="manual">人工评价</option><option value="running">进行中</option></select></label>
+      <label>题目<select id="historyPrompt" aria-label="记录题目"><option value="">全部题目</option></select></label>
+      <label>审核<select id="historyReview" aria-label="记录审核"><option value="">全部审核</option><option value="pending">待确认</option><option value="accepted">确认通过</option><option value="rejected">标记问题</option></select></label>
     </div>
+    <div class="answer-tools"><button id="exportHistory" class="icon-button" aria-label="导出筛选记录" data-tooltip="导出筛选记录" data-icon="Download"></button><button id="clearHistory" class="icon-button" aria-label="清理筛选记录" data-tooltip="清理筛选记录" data-icon="Trash2"></button></div>
     <div id="results"></div>
+    <details id="answerCompare"><summary>回答对比</summary><div class="history-controls"><label>回答 A<select id="compareA" aria-label="对比回答 A"></select></label><label>回答 B<select id="compareB" aria-label="对比回答 B"></select></label></div><div class="compare-columns"><div><p id="compareMetaA" class="meta"></p><pre id="compareTextA"></pre></div><div><p id="compareMetaB" class="meta"></p><pre id="compareTextB"></pre></div></div></details>
     <button id="loadHistory" class="secondary" hidden>加载更多记录</button>
   </section>
   <footer class="footer"><span>Intelligence Check</span><span id="lastSync">等待连接</span></footer>

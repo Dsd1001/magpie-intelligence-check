@@ -2,7 +2,7 @@ import { $, text, icon, hydrateIcons, syncSelect, dateTime, names } from './ui.j
 import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
 import { analyzeAnswer } from './answer-analysis.js';
 import { renderSVGPreview } from './svg-preview.js';
-import { renderHTMLPreview } from './html-preview.js';
+import { renderHTMLPreview, stopHTMLPreview } from './html-preview.js';
 
 let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
 const config = $('#config');
@@ -42,6 +42,7 @@ async function pending(button, work, output = $('#message')) {
   finally { button.disabled = false; button.removeAttribute('aria-busy'); renderControls(); }
 }
 function selectView(name, focus = false) {
+  if (name !== 'tests') stopHTMLPreview();
   document.querySelectorAll('[role=tab]').forEach(tab => {
     const active = tab.dataset.view === name;
     tab.setAttribute('aria-selected', String(active));
@@ -114,8 +115,10 @@ function renderTestAnswer() {
   $('#testRecord').disabled = waiting || !records.length;
   const record = waiting ? undefined : records.find(r => r.id === $('#testRecord').value) || records[0];
   const running = waiting || record?.verdict === 'running';
+  $('#cancelTest').hidden = !data.state.results.some(r => r.model === model && r.verdict === 'running' && r.prompt !== 'modeltrace');
   const answer = record?.answer || '';
-  $('#testStatus').textContent = running ? '检测进行中，等待完整回答（最长 180 秒）。' : record ? record.verdict === 'unavailable' ? '检测未完成' : '检测完成' : modelRunning(model) ? '该模型正在运行其他检测。' : '';
+  const elapsed = record ? Math.max(0, Math.floor((Date.now() - Date.parse(record.time)) / 1000)) : 0;
+  $('#testStatus').textContent = running ? `检测进行中，已等待 ${elapsed} 秒（最长 180 秒）。` : record ? record.verdict === 'unavailable' ? '检测未完成' : '检测完成' : modelRunning(model) ? '该模型正在运行其他检测。' : '';
   $('#testStatus').className = 'inline-state' + (record?.verdict === 'unavailable' ? ' error' : '');
   $('#answerMeta').textContent = record ? `${record.model} / ${dateTime(record.time)} / ${names[record.verdict] || record.verdict} / ${record.tokens || 0} tokens` : model ? `${model} / ${data.prompts.find(p => p.id === prompt)?.name || ''}` : '尚未选择测试模型';
   $('#answerError').hidden = !record?.error && !submissionError;
@@ -138,8 +141,8 @@ function renderTestAnswer() {
   const signature = JSON.stringify([record?.id, record?.answer, record?.error, record?.verdict]);
   if (analysisSignature !== signature) {
     analysisSignature = signature;
-    renderSVGPreview(record);
-    renderHTMLPreview(record);
+    renderSVGPreview(running ? undefined : record);
+    renderHTMLPreview(running ? undefined : record);
     const panel = $('#answerAnalysis'); panel.replaceChildren(); panel.hidden = !answer;
     if (answer) {
       panel.append(text('h3', '自动辅助检查'));
@@ -155,7 +158,8 @@ function showPrompt() {
 }
 function dayCount(model) {
   const day = new Date().toISOString().slice(0, 10);
-  return data.state.results.filter(r => (!model || r.model === model) && new Date(r.time).toISOString().slice(0, 10) === day).length;
+  const cleared = data.state.cleared_usage?.[day] || {};
+  return data.state.results.filter(r => (!model || r.model === model) && new Date(r.time).toISOString().slice(0, 10) === day).length + (model ? cleared[model] || 0 : Object.values(cleared).reduce((a, b) => a + b, 0));
 }
 function validPass(target) { return target.enabled && target.state === 'passed' && Date.now() - Date.parse(target.checked_at) < 900000; }
 function renderTargets() {
@@ -219,9 +223,16 @@ function renderTargets() {
   }
   $('#targets').replaceChildren(...rows);
 }
+function filteredHistory() {
+  return [...data.state.results].reverse().filter(r => (!$('#historyModel').value || r.model === $('#historyModel').value) && (!$('#historyVerdict').value || r.verdict === $('#historyVerdict').value) && (!$('#historyPrompt').value || r.prompt === $('#historyPrompt').value) && (!$('#historyReview').value || (r.review || 'pending') === $('#historyReview').value));
+}
 function renderHistory() {
   if (!data) return;
-  const filtered = [...data.state.results].reverse().filter(r => (!$('#historyModel').value || r.model === $('#historyModel').value) && (!$('#historyVerdict').value || r.verdict === $('#historyVerdict').value));
+  syncSelect($('#historyPrompt'), [['', '全部题目'], ...data.prompts.map(p => [p.id, p.name]), ['modeltrace', 'ModelTrace']]);
+  const filtered = filteredHistory();
+  const candidates = filtered.filter(r => r.answer && r.verdict !== 'running');
+  for (const side of ['A', 'B']) syncSelect($('#compare' + side), [['', '选择回答'], ...candidates.map(r => [r.id, `${r.model} / ${r.prompt} / ${dateTime(r.time)}`])]);
+  renderComparison();
   $('#historyCount').textContent = `${filtered.length} 条记录`;
   $('#loadHistory').hidden = filtered.length <= historyLimit;
   const records = filtered.slice(0, historyLimit);
@@ -245,6 +256,14 @@ function renderHistory() {
   }));
   if (!records.length) $('#results').append(text('p', '暂无符合条件的记录', 'empty-state'));
 }
+function renderComparison() {
+  for (const side of ['A', 'B']) {
+    const record = data?.state.results.find(r => r.id === $('#compare' + side).value);
+    $('#compareText' + side).textContent = record?.answer || '尚未选择回答';
+    $('#compareMeta' + side).textContent = record ? `${record.model} / ${record.prompt} / ${dateTime(record.time)} / ${record.tokens || 0} tokens / ${{accepted:'确认通过', rejected:'标记问题', pending:'待确认'}[record.review || 'pending']}${record.review_note ? ' / ' + record.review_note : ''}` : '';
+  }
+}
+$('#compareA').onchange = $('#compareB').onchange = renderComparison;
 async function refresh() {
   if (polling || stopped) return;
   polling = true;
@@ -294,7 +313,22 @@ $('#copyAnswer').onclick = () => pending($('#copyAnswer'), async () => {
   await navigator.clipboard.writeText($('#testAnswer').textContent);
   feedback('回答已复制', true);
 });
-$('#historyModel').onchange = $('#historyVerdict').onchange = () => { historyLimit = 30; renderHistory(); };
+for (const id of ['historyModel', 'historyVerdict', 'historyPrompt', 'historyReview']) $('#' + id).onchange = () => { historyLimit = 30; renderHistory(); };
+$('#exportHistory').onclick = () => {
+  if (!data) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ exported_at: new Date().toISOString(), results: filteredHistory() }, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = 'intelligence-check-results.json'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+$('#clearHistory').onclick = () => pending($('#clearHistory'), async () => {
+  const records = filteredHistory();
+  if (!records.length) return;
+  if (!confirm(`永久清理当前筛选的 ${records.length} 条记录？原始回答与审核将删除，已消耗预算和模型门禁保持不变。`)) return;
+  await request('/api/results/clear', { ids: records.map(r => r.id) });
+  await refresh();
+  feedback('记录已清理，预算与模型门禁保持不变', true);
+});
 $('#loadHistory').onclick = () => { historyLimit += 30; renderHistory(); };
 $('#run').onclick = () => pending($('#run'), async () => {
   if (!requireGateway()) return;
@@ -311,6 +345,10 @@ $('#run').onclick = () => pending($('#run'), async () => {
     renderTestAnswer();
     throw error;
   }
+});
+$('#cancelTest').onclick = () => pending($('#cancelTest'), async () => {
+  await request('/api/action', { model: $('#model').value, action: 'cancel-test' });
+  await refresh();
 });
 $('#traceRun').onclick = () => pending($('#traceRun'), async () => {
   if (!requireGateway()) return;

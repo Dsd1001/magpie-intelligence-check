@@ -16,10 +16,18 @@ const browser=await chromium.launch({headless:true});
 let badFingerprint=false;
 let manualRun=0, truncated=false;
 let manualSVG;
+let streamAnswer=false;
 const upstream=http.createServer(async(req,res)=>{
  if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo'}]}));return;}
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);const count=Number(body.messages[0].content.match(/ (\d+) 个 1 到 355/)?.[1]);
+ if(streamAnswer && body.stream){
+  res.setHeader('Content-Type','text/event-stream');
+  res.write('data: '+JSON.stringify({choices:[{index:0,delta:{content:'流式部分回答'}}]})+'\n\n');
+  await new Promise(resolve=>{res.once('close',resolve);setTimeout(resolve,5000)});
+  if(!res.destroyed)res.end('data: '+JSON.stringify({choices:[{index:0,delta:{content:'完成'},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
+  return;
+ }
  const numbers=Array.from({length:count},(_,i)=>(i*73%355)+1);
  res.setHeader('Content-Type','application/json');
  const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':!count?(manualSVG || `回答 ${++manualRun}\n<script>window.answerExecuted=true</script>\n翻译结果：你好`) :badFingerprint?'无法提供数字':numbers.join(',');
@@ -104,6 +112,28 @@ try{
  assert.equal(await page.locator('#results details').first().evaluate(el=>el.open),true,'poll collapsed answer');
  await page.locator('#historyVerdict').selectOption('failed');assert.match(await page.locator('#results').textContent(),/暂无/);
  await page.locator('#historyVerdict').selectOption('manual');assert.equal(await page.locator('#results details').count(),11);
+ await page.locator('#historyReview').selectOption('accepted');
+ assert.equal(await page.locator('#results details').count(),1,'review filter ignored');
+ await page.locator('#historyPrompt').selectOption('repeat');
+ const exported=page.waitForEvent('download');
+ await page.locator('#exportHistory').click();
+ const exportFile=await exported;
+ const exportData=JSON.parse(await fs.readFile(await exportFile.path(),'utf8'));
+ assert.equal(exportData.results.length,1,'export ignored filters');
+ assert.equal(exportData.results[0].review,'accepted');
+ assert.equal(exportData.results[0].prompt,'repeat');
+ assert.equal(Object.hasOwn(exportData,'config'),false,'export leaked gateway configuration');
+ await page.locator('#historyPrompt').selectOption('');
+ await page.locator('#historyReview').selectOption('');
+ await page.locator('#answerCompare summary').click();
+ const comparisonOptions=await page.locator('#compareA option').evaluateAll(options=>options.slice(1,3).map(o=>o.value));
+ await page.locator('#compareA').selectOption(comparisonOptions[0]);
+ await page.locator('#compareB').selectOption(comparisonOptions[1]);
+ assert.ok((await page.locator('#compareTextA').textContent()).length>0);
+ assert.ok((await page.locator('#compareTextB').textContent()).length>0);
+ assert.match(await page.locator('#compareMetaA').textContent(),/tokens/);
+ await page.waitForTimeout(3200);
+ assert.equal(await page.locator('#compareA').inputValue(),comparisonOptions[0],'poll reset comparison');
  const download=await page.locator('#results a.download').first().getAttribute('href');
  const answer=await context.request.get(info.origin+download);assert.equal(answer.status(),200);assert.ok((await answer.text()).length>0);
  await page.locator('#settings').click();
@@ -162,9 +192,17 @@ try{
  await page.locator('#run').click();
  const live=page.frameLocator('#htmlFrameHost iframe');
  await live.locator('#live').waitFor({timeout:15000});
+ await page.waitForFunction(()=>document.querySelector('#htmlPreviewStatus').textContent==='预览已加载');
  await page.waitForTimeout(250);
  assert.equal(await live.locator('body').evaluate(()=>window.isolated&&window.storageBlocked&&window.networkBlocked),true,'preview escaped isolation');
  assert.equal(await page.evaluate(()=>document.body.dataset.escaped),undefined);
+ const consoleURL=page.url();
+ await live.locator('body').evaluate(()=>{
+  try { top.location.href='https://external.invalid/escape'; } catch { window.topBlocked=true; }
+  window.popupBlocked=window.open('https://external.invalid/popup')===null;
+ });
+ assert.equal(page.url(),consoleURL,'preview navigated management page');
+ assert.equal(await live.locator('body').evaluate(()=>window.topBlocked&&window.popupBlocked),true,'preview acquired navigation or popup privilege');
  const start=await live.locator('body').evaluate(()=>window.started);
  const colors=new Set();
  for(let i=0;i<6;i++){
@@ -185,8 +223,36 @@ try{
  await page.waitForTimeout(3200);assert.equal(await page.locator('#htmlFrameHost iframe').count(),0,'poll resumed stopped preview');
  await page.locator('#reloadHTML').click();await live.locator('#live').waitFor();
  assert.notEqual(await live.locator('body').evaluate(()=>window.started),start);
+ for(const width of ['390','768','1280']){
+  await page.locator('#htmlPreviewSize').selectOption(width);
+  assert.equal(await live.locator('body').evaluate(()=>innerWidth),Number(width)-2);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'fixed preview overflowed console');
+ }
+ await page.locator('#htmlPreviewSize').selectOption('');
+ await page.locator('#tab-history').click();
+ assert.equal(await page.locator('#htmlFrameHost iframe').count(),0,'hidden preview kept running');
+ await page.locator('#tab-tests').click();
+ assert.equal(await page.locator('#htmlFrameHost iframe').count(),0,'tab return auto-ran preview');
+ await page.route('**/api/results/*/preview*',route=>route.fulfill({status:503,contentType:'text/html',body:'<!DOCTYPE html><html>gateway error</html>'}));
+ await page.locator('#reloadHTML').click();
+ await page.waitForFunction(()=>document.querySelector('#htmlPreviewStatus').textContent.includes('HTTP 503'));
+ assert.equal(await page.locator('#htmlFrameHost iframe').count(),0,'failed response rendered as preview');
+ await page.unroute('**/api/results/*/preview*');
+ manualSVG='```html\n<p id="candidate">first</p>\n```\n```html\n<p id="candidate">second</p>\n```\n```css\np{color:rgb(255,0,0)}\n```\n```javascript\ndocument.querySelector("p").textContent="combined";\n```';
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#htmlPreviewCandidate').options.length===3,{},{timeout:15000});
+ await page.locator('#htmlPreviewCandidate').selectOption('1');
+ await live.locator('#candidate').filter({hasText:'second'}).waitFor();
+ await page.locator('#htmlPreviewCandidate').selectOption('2');
+ await live.locator('#candidate').filter({hasText:'combined'}).waitFor();
+ assert.equal(await live.locator('#candidate').evaluate(p=>getComputedStyle(p).color),'rgb(255, 0, 0)');
+ await page.locator('#expandHTML').click();
+ assert.equal(await page.locator('#expandHTML').getAttribute('aria-pressed'),'true');
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#expandHTML').getAttribute('aria-pressed'),'false');
+ assert.match(await page.locator('#testAnswer').textContent(),/first/,'combination modified raw answer');
  await page.locator('#prompt').selectOption('svg');assert.equal(await page.locator('#htmlFrameHost iframe').count(),0);
- assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')&&!/Connecting to .*violates|Fetch API cannot load/.test(e)),[]);
+ assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')&&!e.includes('503 (Service Unavailable)')&&!/Connecting to .*violates|Fetch API cannot load|Unsafe attempt to initiate navigation|Blocked opening/.test(e)),[]);
  console.log('PASS: HTML inline animation, canvas pixels, interaction, origin/storage/network isolation, stable polling, stop/reload and 320/390/1280px previews');
  await page.locator('#tab-models').click();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除 fixture/solo',exact:true}).click();
@@ -196,4 +262,33 @@ try{
  await page.waitForFunction(()=>document.querySelector('#model').value==='fixture/readded');
  assert.equal(await page.locator('#traceModel').inputValue(),'fixture/readded');
  await page.locator('#tab-history').click();assert.ok(await page.locator('#results details').count()>0,'delete erased history');
+ await page.locator('#tab-tests').click();await page.locator('#prompt').selectOption('repeat');
+ await page.locator('#run').click();
+ await page.locator('#cancelTest').waitFor({state:'visible',timeout:15000});
+ await page.locator('#cancelTest').click();
+ await page.waitForFunction(()=>document.querySelector('#answerError').textContent.includes('检测已取消'),{},{timeout:15000});
+ await page.waitForFunction(()=>!document.querySelector('#run').disabled);
+ assert.equal(await page.locator('#cancelTest').isVisible(),false);
+ console.log('PASS: cancellation UI interrupts quality test and enables retry');
+ streamAnswer=true;
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#testAnswer').textContent==='流式部分回答',{},{timeout:15000});
+ assert.equal(await page.locator('#testAnswer').getAttribute('aria-busy'),'true','stream only shown after completion');
+ await page.locator('#cancelTest').click();
+ await page.waitForFunction(()=>document.querySelector('#answerError').textContent.includes('检测已取消'),{},{timeout:15000});
+ assert.equal(await page.locator('#testAnswer').textContent(),'流式部分回答','cancellation lost stream output');
+ console.log('PASS: live partial output and preservation after stream cancellation');
+ await page.waitForFunction(()=>!document.querySelector('#run').disabled);
+ const spent=await page.locator('#statRequests').textContent();
+ await page.locator('#tab-history').click();
+ await page.locator('#historyVerdict').selectOption('');
+ await page.locator('#historyModel').selectOption('fixture/readded');
+ page.once('dialog',dialog=>dialog.dismiss());await page.locator('#clearHistory').click();
+ assert.ok(await page.locator('#results details').count()>0,'dismissed clear deleted records');
+ page.once('dialog',dialog=>dialog.accept());await page.locator('#clearHistory').click();
+ await page.waitForFunction(()=>document.querySelector('#results').textContent.includes('暂无符合'));
+ assert.equal(await page.locator('#statRequests').textContent(),spent,'clear restored budget');
+ await page.reload();await page.waitForSelector('#prompt option',{state:'attached'});
+ assert.equal(await page.locator('#statRequests').textContent(),spent,'reload lost cleared budget');
+ console.log('PASS: confirmed filtered cleanup preserves budget after reload');
 }finally{await browser.close();await new Promise(resolve=>upstream.close(resolve));const exited=new Promise(r=>child.once('exit',r));child.stdin.end();await exited;await fs.rm(dir,{recursive:true,force:true})}

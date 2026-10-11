@@ -94,16 +94,53 @@ func (s *Service) DeleteTarget(model string) error {
 }
 
 type State struct {
-	Config  Config             `json:"config"`
-	Targets map[string]*Target `json:"targets"`
-	Results []Result           `json:"results"`
-	Alias   string             `json:"alias"`
+	Config       Config                    `json:"config"`
+	Targets      map[string]*Target        `json:"targets"`
+	Results      []Result                  `json:"results"`
+	Alias        string                    `json:"alias"`
+	ClearedUsage map[string]map[string]int `json:"cleared_usage,omitempty"`
 }
+
+func (s *Service) ClearResults(ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.running) > 0 {
+		return errors.New("检测进行中，请完成或取消后再清理记录")
+	}
+	selected := make(map[string]bool)
+	for _, id := range ids {
+		selected[id] = true
+	}
+	previous, _ := json.Marshal(s.state)
+	if s.state.ClearedUsage == nil {
+		s.state.ClearedUsage = make(map[string]map[string]int)
+	}
+	kept := make([]Result, 0, len(s.state.Results))
+	for _, result := range s.state.Results {
+		if !selected[result.ID] {
+			kept = append(kept, result)
+			continue
+		}
+		day := result.Time.UTC().Format("2006-01-02")
+		if s.state.ClearedUsage[day] == nil {
+			s.state.ClearedUsage[day] = make(map[string]int)
+		}
+		s.state.ClearedUsage[day][result.Model]++
+	}
+	s.state.Results = kept
+	if err := s.store.Save(s.state); err != nil {
+		json.Unmarshal(previous, &s.state)
+		return err
+	}
+	return nil
+}
+
 type Service struct {
 	mu           sync.Mutex
 	state        State
 	dir, gate    string
 	running      map[string]bool
+	testCancels  map[string]context.CancelFunc
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
@@ -310,6 +347,7 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	}
 	count := 0
 	day := time.Now().UTC().Format("2006-01-02")
+	count += s.state.ClearedUsage[day][model]
 	for _, r := range s.state.Results {
 		if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
 			count++
@@ -329,14 +367,27 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 		return err
 	}
 	s.running[model] = true
+	if s.testCancels == nil {
+		s.testCancels = make(map[string]context.CancelFunc)
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
+	s.testCancels[model] = cancel
 	s.wg.Add(1)
-	go s.run(model, p)
+	go s.run(ctx, model, p)
 	return nil
 }
-func (s *Service) run(model string, p Prompt) {
+func (s *Service) CancelTest(model string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cancel := s.testCancels[model]
+	if cancel == nil {
+		return errors.New("该模型没有可取消的质量检测")
+	}
+	cancel()
+	return nil
+}
+func (s *Service) run(ctx context.Context, model string, p Prompt) {
 	defer s.wg.Done()
-	ctx, cancel := context.WithTimeout(s.ctx, 180*time.Second)
-	defer cancel()
 	verdict, reason := "unavailable", ""
 	for attempt := 0; attempt < 2; attempt++ {
 		s.mu.Lock()
@@ -344,6 +395,7 @@ func (s *Service) run(model string, p Prompt) {
 		alias := s.state.Alias
 		count := 0
 		day := time.Now().UTC().Format("2006-01-02")
+		count += s.state.ClearedUsage[day][model]
 		for _, r := range s.state.Results {
 			if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
 				count++
@@ -364,12 +416,19 @@ func (s *Service) run(model string, p Prompt) {
 			reason = err.Error()
 			break
 		}
-		answer, tokens, err := Call(ctx, cfg, "quality-probe/"+alias+"/"+model, p.Text)
+		answer, tokens, err := call(ctx, cfg, "quality-probe/"+alias+"/"+model, p.Text, func(partial string) {
+			s.mu.Lock()
+			s.state.Results[idx].Answer = partial
+			s.mu.Unlock()
+		})
 		r.Answer = answer
 		r.Tokens = tokens
 		if err != nil {
 			r.Verdict = "unavailable"
 			r.Error = err.Error()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				r.Error = "检测已取消"
+			}
 		} else {
 			r.Verdict = Grade(p.ID, answer)
 		}
@@ -397,6 +456,8 @@ func (s *Service) run(model string, p Prompt) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.running, model)
+	s.testCancels[model]()
+	delete(s.testCancels, model)
 	t := s.state.Targets[model]
 	if !p.Automatic {
 		s.saveLocked()

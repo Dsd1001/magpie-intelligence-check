@@ -9,6 +9,63 @@ import (
 	"time"
 )
 
+func TestCancelQualityRequest(t *testing.T) {
+	s := fixture(t)
+	started := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer up.Close()
+	s.Configure(Config{GatewayURL: up.URL, GatewayKey: "fixture", DailyLimit: 20})
+	s.SetTarget("a/solo", true)
+	if err := s.Trigger("a/solo", "milk", true); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := s.CancelTest("a/solo"); err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	state, _ := s.Snapshot()
+	if len(state.Results) != 1 || state.Results[0].Error != "检测已取消" || state.Targets["a/solo"].State == "passed" {
+		t.Fatal(state)
+	}
+	if s.CancelTest("a/solo") == nil {
+		t.Fatal("completed test remained cancellable")
+	}
+}
+
+func TestClearHistoryPreservesBudgetAndGate(t *testing.T) {
+	s := fixture(t)
+	s.Configure(Config{GatewayURL: "http://127.0.0.1:1", GatewayKey: "fixture", DailyLimit: 1})
+	s.SetTarget("a/solo", true)
+	s.Action("a/solo", "hold")
+	s.state.Results = append(s.state.Results, Result{ID: "old", Model: "a/solo", Time: time.Now(), Answer: "private"})
+	s.running["a/solo"] = true
+	if s.ClearResults([]string{"old"}) == nil {
+		t.Fatal("cleared while running")
+	}
+	delete(s.running, "a/solo")
+	if err := s.ClearResults([]string{"old"}); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := s.Snapshot()
+	if len(state.Results) != 0 || state.Targets["a/solo"].State != "review" {
+		t.Fatal(state)
+	}
+	if err := s.Trigger("a/solo", "repeat", true); err == nil || !strings.Contains(err.Error(), "预算") {
+		t.Fatal("clearing restored budget", err)
+	}
+	var stored State
+	if err := s.store.Load(&stored); err != nil || stored.ClearedUsage[time.Now().UTC().Format("2006-01-02")]["a/solo"] != 1 {
+		t.Fatal("budget not persisted", err)
+	}
+}
+
 func TestDisabledTargetAllowsManualTestsOnly(t *testing.T) {
 	s := fixture(t)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

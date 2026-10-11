@@ -116,6 +116,19 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		io.WriteString(w, result.Answer)
 	})
 	mux.HandleFunc("GET /api/results/{id}/preview", s.htmlPreview)
+	mux.HandleFunc("POST /api/results/clear", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			IDs []string `json:"ids"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.ClearResults(input.IDs); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("POST /api/results/{id}/review", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Decision string `json:"decision"`
@@ -208,7 +221,9 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		var err error
-		if a.Action == "modeltrace" {
+		if a.Action == "cancel-test" {
+			err = s.CancelTest(a.Model)
+		} else if a.Action == "modeltrace" {
 			err = s.TriggerModelTrace(a.Model)
 		} else if a.Action == "test" {
 			if a.Prompt == "" {

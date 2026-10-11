@@ -1,6 +1,7 @@
 package check
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -73,7 +74,14 @@ func Models(ctx context.Context, c Config) ([]Model, error) {
 }
 
 func Call(ctx context.Context, c Config, model, prompt string) (string, int, error) {
-	payload := map[string]any{"model": model, "stream": false, "max_tokens": 8192, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
+	return call(ctx, c, model, prompt, nil)
+}
+
+func call(ctx context.Context, c Config, model, prompt string, progress func(string)) (string, int, error) {
+	payload := map[string]any{"model": model, "stream": progress != nil, "max_tokens": 8192, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
+	if progress != nil {
+		payload["stream_options"] = map[string]bool{"include_usage": true}
+	}
 	b, _ := json.Marshal(payload)
 	base := strings.TrimRight(c.GatewayURL, "/")
 	if !strings.HasSuffix(base, "/v1") {
@@ -90,6 +98,12 @@ func Call(ctx context.Context, c Config, model, prompt string) (string, int, err
 		return "", 0, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", 0, fmt.Errorf("Magpie HTTP %d", resp.StatusCode)
+	}
+	if progress != nil && strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return readAnswerStream(resp.Body, progress)
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
 	if err != nil {
 		return "", 0, err
@@ -125,6 +139,92 @@ func Call(ctx context.Context, c Config, model, prompt string) (string, int, err
 		return "", out.Usage.Total, errors.New("空回答")
 	}
 	return ch.Message.Content, out.Usage.Total, nil
+}
+
+func readAnswerStream(body io.Reader, progress func(string)) (string, int, error) {
+	const limit = 4 * 1024 * 1024
+	scanner := bufio.NewScanner(io.LimitReader(body, limit+1))
+	scanner.Buffer(make([]byte, 4096), limit)
+	var answer strings.Builder
+	tokens, bytesRead := 0, 0
+	finished, done := false, false
+	var event []string
+	consume := func() error {
+		if len(event) == 0 {
+			return nil
+		}
+		data := strings.Join(event, "\n")
+		event = nil
+		if data == "[DONE]" {
+			done = true
+			return nil
+		}
+		var chunk struct {
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				Finish *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage struct {
+				Total int `json:"total_tokens"`
+			} `json:"usage"`
+			Error json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &chunk) != nil || len(chunk.Error) > 0 && string(chunk.Error) != "null" {
+			return errors.New("无法解析流式回复")
+		}
+		if chunk.Usage.Total > 0 {
+			tokens = chunk.Usage.Total
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Index != 0 {
+				return errors.New("缺少唯一有效回答")
+			}
+			answer.WriteString(choice.Delta.Content)
+			if choice.Delta.Content != "" {
+				progress(answer.String())
+			}
+			if choice.Finish != nil {
+				if *choice.Finish != "stop" {
+					return errors.New("回复未正常结束或被截断")
+				}
+				finished = true
+			}
+		}
+		return nil
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		bytesRead += len(line) + 1
+		if bytesRead > limit {
+			return answer.String(), tokens, errors.New("回复超过大小限制")
+		}
+		if line == "" {
+			if err := consume(); err != nil {
+				return answer.String(), tokens, err
+			}
+			if done {
+				break
+			}
+		} else if strings.HasPrefix(line, "data:") {
+			event = append(event, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return answer.String(), tokens, err
+	}
+	if err := consume(); err != nil {
+		return answer.String(), tokens, err
+	}
+	if !finished || !done {
+		return answer.String(), tokens, errors.New("流式回复连接中断或未完整结束")
+	}
+	if strings.TrimSpace(answer.String()) == "" {
+		return "", tokens, errors.New("空回答")
+	}
+	return answer.String(), tokens, nil
 }
 
 var finalNumber = regexp.MustCompile(`(?i)(?:\*\*)?(\d+(?:\.\d+)?)(?:\*\*)?\s*(?:inches|inch|英寸)`)

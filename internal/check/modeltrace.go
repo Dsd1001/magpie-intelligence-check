@@ -59,6 +59,7 @@ func (s *Service) TriggerModelTrace(model string) error {
 	}
 	count := 0
 	day := time.Now().UTC().Format("2006-01-02")
+	count += s.state.ClearedUsage[day][model]
 	for _, r := range s.state.Results {
 		if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
 			count++

@@ -48,3 +48,18 @@ func TestExtractHTML(t *testing.T) {
 		}
 	}
 }
+
+func TestHTMLCandidatesAndCombination(t *testing.T) {
+	answer := "```html\n<p>first</p>\n```\n```html\n<button>second</button>\n```\n```css\np{color:red}\n```\n```javascript\nwindow.combined=true\n```"
+	candidates, combined := htmlCandidates(answer)
+	if !combined || len(candidates) != 3 || candidates[1] != "<button>second</button>" || !strings.Contains(candidates[2], "<style>") || !strings.Contains(candidates[2], "window.combined=true") {
+		t.Fatal(candidates)
+	}
+}
+
+func TestPreviewRemovesDeclarativeNavigation(t *testing.T) {
+	source, err := restrictHTMLNavigation(`<html><head><meta http-equiv="refresh" content="0;url=https://example.com"><base href="https://example.com"></head><body><a href="https://example.com" target="_top" ping="https://example.com">external</a><a href="#local">local</a><form action="https://example.com"><button formaction="https://example.com">submit</button></form><script>window.animation=true</script></body></html>`)
+	if err != nil || strings.Contains(source, "example.com") || !strings.Contains(source, `href="#local"`) || !strings.Contains(source, "window.animation=true") {
+		t.Fatal(source, err)
+	}
+}
