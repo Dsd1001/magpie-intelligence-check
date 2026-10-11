@@ -5,7 +5,8 @@ import path from 'node:path';
 
 const root=path.resolve(import.meta.dirname,'..');
 const platforms=[['linux','amd64'],['linux','arm64'],['darwin','amd64'],['darwin','arm64'],['windows','amd64']];
-const manifest={version:'0.1.0',artifacts:[]};
+const {version}=JSON.parse(await readFile(path.join(root,'package.json'),'utf8'));
+const manifest={version,artifacts:[]};
 for(const [goos,goarch] of platforms){
  const name=`quality-check-${goos}-${goarch}${goos==='windows'?'.exe':''}`;
  const output=path.join(root,'dist',name);await mkdir(path.dirname(output),{recursive:true});
