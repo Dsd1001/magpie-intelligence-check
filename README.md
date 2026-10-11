@@ -272,6 +272,7 @@ node scripts/package-check.mjs
 
 ```sh
 MAGPIE_BINARY=/absolute/path/to/magpie node scripts/magpie-integration.mjs
+MAGPIE_BINARY=/absolute/path/to/magpie MAGPIE_BUN=/absolute/path/to/bun node scripts/gateway-integration.mjs
 MAGPIE_BINARY=/absolute/path/to/magpie node scripts/install-check.mjs
 node scripts/plugin-check.mjs
 node scripts/client-check.mjs
@@ -283,6 +284,7 @@ node scripts/auth-browser-check.mjs
 其中：
 
 - `magpie-integration.mjs` 验证真实 Magpie 网关中的门禁、探针别名和日志触发；
+- `gateway-integration.mjs` 验证真实 Magpie 管理页面加载完整插件后自动发现、验证并保存网关；需要 Node.js 24，`MAGPIE_BUN` 指向已有 Bun，测试使用独立的临时配置；
 - `install-check.mjs` 验证发行包解压、插件注册和宿主退出清理；
 - `client-check.mjs` 验证客户端能看到 `MAGPIE_QUALITY_REVIEW_REQUIRED` API 错误；
 - `cloudflare-check.mjs` 验证临时 HTTPS 入口、会话交换和关闭；
