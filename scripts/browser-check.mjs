@@ -13,26 +13,79 @@ const child=spawn(path.join(root,'bin/quality-check'),['-data',dir,'-gate',path.
 let output='';
 const info=await new Promise((resolve,reject)=>{child.stdout.on('data',b=>{output+=b;const i=output.indexOf('\n');if(i>=0)resolve(JSON.parse(output.slice(0,i)))});child.once('error',reject)});
 const browser=await chromium.launch({headless:true});
+let badFingerprint=false;
 const upstream=http.createServer(async(req,res)=>{
+ if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo'}]}));return;}
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);const count=Number(body.messages[0].content.match(/ (\d+) 个 1 到 355/)?.[1]);
  const numbers=Array.from({length:count},(_,i)=>(i*73%355)+1);
  res.setHeader('Content-Type','application/json');
- res.end(JSON.stringify({choices:[{message:{content:numbers.join(',')},finish_reason:'stop'}],usage:{total_tokens:count}}));
+ const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':badFingerprint?'无法提供数字':numbers.join(',');
+ res.end(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}],usage:{total_tokens:count||4}}));
 });
 await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
 try{
  const context=await browser.newContext();const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ page.on('console',msg=>{if(msg.type()==='error')errors.push(msg.text())});
  await page.goto(info.url);await page.waitForSelector('#prompt option',{state:'attached'});
  assert.equal(await page.locator('#prompt option').count(),7);
  await page.locator('#target input').fill('fixture/solo');await page.locator('#target button').last().click();await page.waitForSelector('#targets tr');
+ await page.locator('#tab-tests').click();
  await page.locator('#prompt').selectOption('repeat');assert.match(await page.locator('#promptText').textContent(),/StarSrvGroupBody/);
- await page.evaluate(async gateway=>{await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gateway_url:gateway,gateway_key:'fixture',daily_limit:120})})},`http://127.0.0.1:${upstream.address().port}`);
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#settingsDialog').open);
+ await page.locator('#config input[name=gateway_url]').fill(`http://127.0.0.1:${upstream.address().port}`);
+ await page.locator('#config input[name=gateway_key]').fill('fixture');
+ await page.locator('#config button.primary').click();
+ await page.waitForFunction(()=>document.querySelector('#configMessage').textContent.includes('连接成功'));
+ assert.equal(await page.locator('#config input[name=gateway_key]').inputValue(),'');
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#settingsDialog').evaluate(el=>el.open),false);
+ await page.locator('#tab-fingerprint').click();
  await page.locator('#traceRun').click();
  await page.waitForFunction(()=>document.querySelector('#traceResults').textContent.includes('最相似候选'),{},{timeout:15000});
  await page.locator('#traceResults summary').click();
  assert.equal(await page.locator('#traceResults tbody tr').count(),18);
  assert.match(await page.locator('#targets').textContent(),/未检测/);
+ await page.waitForTimeout(3200);
+ assert.equal(await page.locator('#traceResults details').evaluate(el=>el.open),true,'poll collapsed ranking');
+ await page.locator('#traceRun').click();
+ await page.waitForFunction(()=>document.querySelector('#traceBatch').options.length===3 && !document.querySelector('#traceRun').disabled,{},{timeout:15000});
+ const older=await page.locator('#traceBatch option').last().getAttribute('value');
+ await page.locator('#traceBatch').selectOption(older);
+ assert.match(await page.locator('#traceResults').textContent(),/最相似候选/);
+ await page.locator('#tab-tests').click();
+ await page.locator('#prompt').selectOption('milk');await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#statPassed').textContent==='1',{},{timeout:15000});
+ await page.locator('#tab-models').click();
+ await page.getByRole('button',{name:'暂停 fixture/solo',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#targets').textContent.includes('人工确认'));
+ badFingerprint=true;
+ await page.locator('#tab-fingerprint').click();await page.locator('#traceBatch').selectOption('');
+ await page.locator('#traceRun').click();
+ await page.waitForFunction(()=>/本轮不作归因|本轮无法归因/.test(document.querySelector('#traceResults').textContent),{},{timeout:15000});
+ assert.equal(await page.locator('#traceResults .trace-report').count(),0,'invalid output attributed');
+ assert.match(await page.locator('#targets').textContent(),/人工确认/);
+ await page.locator('#traceBatch').selectOption(older);
+ await page.locator('#tab-history').click();
+ await page.waitForSelector('#results details');
+ await page.locator('#results summary').first().click();
+ await page.waitForTimeout(3200);
+ assert.equal(await page.locator('#results details').first().evaluate(el=>el.open),true,'poll collapsed answer');
+ await page.locator('#historyVerdict').selectOption('failed');assert.match(await page.locator('#results').textContent(),/暂无/);
+ await page.locator('#historyVerdict').selectOption('manual');assert.equal(await page.locator('#results details').count(),9);
+ const download=await page.locator('#results a.download').first().getAttribute('href');
+ const answer=await context.request.get(info.origin+download);assert.equal(answer.status(),200);assert.ok((await answer.text()).length>0);
+ await page.locator('#settings').click();
+ await page.locator('#config input[name=log_path]').fill('/draft/unsaved');
+ await page.waitForTimeout(3200);
+ assert.equal(await page.locator('#config input[name=log_path]').inputValue(),'/draft/unsaved','poll erased draft');
+ await page.keyboard.press('Escape');
+ await page.locator('#theme').click();assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+ await page.locator('#tab-history').focus();await page.keyboard.press('Home');
+ assert.equal(await page.locator('#tab-models').getAttribute('aria-selected'),'true');
+ await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#tab-tests').getAttribute('aria-selected'),'true');
+ assert.equal(await page.locator('#prompt').inputValue(),'milk','poll reset selected prompt');
  let failNextState=true;
  await page.route('**/api/state',async route=>{
   if(failNextState){failNextState=false;await route.fulfill({status:502,contentType:'text/html',body:'<!DOCTYPE html><html>Cloudflare bad gateway</html>'});}
@@ -44,9 +97,20 @@ try{
  await page.unroute('**/api/state');
  await fs.mkdir(path.join(root,'artifacts'),{recursive:true});
  for(const [name,width,height]of [['desktop',1280,900],['mobile',390,844]]){
-  await page.setViewportSize({width,height});await page.screenshot({path:path.join(root,'artifacts',name+'.png'),fullPage:true});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${name} overflow`);
+  await page.setViewportSize({width,height});
+  for(const mode of ['dark','light']){
+   if(await page.locator('html').getAttribute('data-theme')!==mode)await page.locator('#theme').click();
+   for(const view of ['models','tests','fingerprint','history']){
+    await page.locator('#tab-'+view).click();
+    await page.screenshot({path:path.join(root,'artifacts',`${name}-${mode}-${view}.png`),fullPage:true});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${name} ${view} overflow`);
+   }
+  }
  }
- assert.deepEqual(errors,[]);console.log('PASS: seven prompts, ModelTrace batch and ranking, unchanged gate, desktop/mobile layout, no browser errors');
+ await page.setViewportSize({width:320,height:720});
+ for(const view of ['models','tests','fingerprint','history']){
+  await page.locator('#tab-'+view).click();assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`320px ${view} overflow`);
+ }
+ assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')),[]);console.log('PASS: configuration flow, seven prompts, two fingerprint batches, 18 candidates, preserved drafts/details, filters, keyboard, dark/light desktop and 320/390px mobile, transient 502 recovery');
  assert.equal(await page.locator('#message').textContent(),'','页面显示错误');
 }finally{await browser.close();await new Promise(resolve=>upstream.close(resolve));const exited=new Promise(r=>child.once('exit',r));child.stdin.end();await exited;await fs.rm(dir,{recursive:true,force:true})}

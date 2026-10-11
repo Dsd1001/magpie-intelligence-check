@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -19,6 +20,8 @@ func (s *Service) Handler(token string) http.Handler {
 }
 func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler {
 	mux := http.NewServeMux()
+	root, _ := fs.Sub(web, "web")
+	mux.Handle("GET /assets/", http.FileServer(http.FS(root)))
 	mux.HandleFunc("GET /modeltrace/{file}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("file")
 		if name != "fingerprint-core.js" && name != "unified_bank.json" && name != "panel.js" {
@@ -79,6 +82,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		state, health := s.Snapshot()
 		s.mu.Lock()
 		lastActivity := s.lastActivity
+		gatewayConfigured := s.state.Config.GatewayURL != "" && s.state.Config.GatewayKey != ""
 		s.mu.Unlock()
 		logHealth := "未配置日志源：自动触发不可用"
 		if state.Config.LogPath != "" {
@@ -90,7 +94,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				logHealth = "日志源可读"
 			}
 		}
-		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "prompts": Prompts, "guidance": Guidance})
+		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": Prompts, "guidance": Guidance})
 	})
 	mux.HandleFunc("GET /api/results/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -133,6 +137,32 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
+	mux.HandleFunc("POST /api/config/initial", func(w http.ResponseWriter, r *http.Request) {
+		var c Config
+		if !decode(w, r, &c) {
+			return
+		}
+		if err := s.ConfigureInitial(c); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/connection/check", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		cfg := s.state.Config
+		s.mu.Unlock()
+		if cfg.GatewayURL == "" || cfg.GatewayKey == "" {
+			http.Error(w, "请先保存 Magpie 网关 URL 和 Key", 400)
+			return
+		}
+		models, err := Models(r.Context(), cfg)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "model_count": len(models)})
+	})
 	mux.HandleFunc("POST /api/target", func(w http.ResponseWriter, r *http.Request) {
 		var t Target
 		if !decode(w, r, &t) {
@@ -170,7 +200,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; connect-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; connect-src 'self'")
 		// A public readiness probe exposes no management state or credentials.
 		if r.Method == "GET" && r.URL.Path == "/health" {
 			w.Header().Set("X-Magpie-Quality", "ready")
@@ -199,6 +229,10 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		control := subtle.ConstantTimeCompare([]byte(supplied), []byte(access.control)) == 1
 		if !control && !access.Session(supplied) {
 			http.Error(w, "请使用插件生成的完整管理链接", 401)
+			return
+		}
+		if r.URL.Path == "/api/config/initial" && !control {
+			http.Error(w, "仅插件可初始化连接", 403)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/console") && !control {

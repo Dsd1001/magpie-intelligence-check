@@ -4,7 +4,7 @@ export async function waitForConsole(url, options = {}) {
   const interval = options.interval ?? 1000;
   const deadline = Date.now() + timeout;
   const health = new URL('/health', url);
-  let lastStatus;
+  let lastStatus, networkCode;
   while (Date.now() < deadline) {
     try {
       const r = await fetcher(health, {
@@ -15,8 +15,11 @@ export async function waitForConsole(url, options = {}) {
       const ready = r.status === 204 && r.headers.get('x-magpie-quality') === 'ready';
       await r.body?.cancel();
       if (ready) return;
-    } catch {}
+    } catch (error) {
+      const code = error.cause?.code || error.code;
+      if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(code)) networkCode = code;
+    }
     await new Promise(resolve => setTimeout(resolve, Math.min(interval, Math.max(0, deadline - Date.now()))));
   }
-  throw Error(`临时远程控制台尚不可用${lastStatus ? `（HTTP ${lastStatus}）` : ''}，请检查服务器网络后重新打开。`);
+  throw Error(`临时远程控制台尚不可用${lastStatus ? `（HTTP ${lastStatus}）` : networkCode ? `（${networkCode}）` : ''}，请检查服务器网络后重新打开。`);
 }

@@ -30,6 +30,8 @@ type Model struct {
 }
 
 func Models(ctx context.Context, c Config) ([]Model, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	if err := ValidateGateway(c.GatewayURL); err != nil {
 		return nil, err
 	}

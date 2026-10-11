@@ -4,11 +4,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveCloudflared } from './cloudflared-runtime.mjs';
-import { discoverGateway } from './gateway-discovery.mjs';
+import { startGatewayDiscovery } from './gateway-discovery.mjs';
 import { waitForConsole } from './console-readiness.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-let child, ready;
+let child, ready, stopDiscovery;
 function start(options = {}) {
   if (ready) return ready;
   ready = new Promise((resolve, reject) => {
@@ -27,7 +27,7 @@ function start(options = {}) {
     child.stdout.on('data', b => { output += b; const i = output.indexOf('\n'); if (i >= 0) { try { const v = JSON.parse(output.slice(0, i)); clearTimeout(timer); resolve(v); } catch { reject(new Error('后台启动信息无效')); } } });
     child.stderr.on('data', () => {});
     child.once('error', e => { clearTimeout(timer); ready = undefined; reject(new Error(`无法启动 Go 后台，请先构建二进制：${e.message}`)); });
-    child.once('exit', () => { clearTimeout(timer); ready = undefined; reject(new Error('检测后台已退出')); });
+    child.once('exit', () => { clearTimeout(timer); stopDiscovery?.(); stopDiscovery = undefined; ready = undefined; reject(new Error('检测后台已退出')); });
   });
   return ready;
 }
@@ -61,12 +61,7 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
     // Start on host configuration so persisted monitoring works after restart.
     await start(options);
     const service=await ready;
-    const headers={authorization:'Bearer '+service.control,'content-type':'application/json'};
-    const state=await fetch(service.origin+'/api/state',{headers}).then(r=>r.json());
-    if(!state.state.config.gateway_url){
-      const discovered=await discoverGateway(options);
-      if(discovered){const saved=await fetch(service.origin+'/api/config',{method:'POST',headers,body:JSON.stringify(discovered)});if(!saved.ok)throw Error('无法保存已验证的 Magpie 网关连接');}
-    }
+    stopDiscovery ??= startGatewayDiscovery(service, options);
     cfg.provider ??= {};
     cfg.provider['quality-check'] = { name: 'Intelligence Check', models: {} };
   }

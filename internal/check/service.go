@@ -168,6 +168,17 @@ func (s *Service) Snapshot() (State, string) {
 func (s *Service) Configure(c Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.configureLocked(c)
+}
+func (s *Service) ConfigureInitial(c Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state.Config.GatewayURL != "" {
+		return nil
+	}
+	return s.configureLocked(c)
+}
+func (s *Service) configureLocked(c Config) error {
 	if c.GatewayKey == "" {
 		c.GatewayKey = s.state.Config.GatewayKey
 	}
@@ -176,6 +187,9 @@ func (s *Service) Configure(c Config) error {
 	}
 	if err := ValidateGateway(c.GatewayURL); err != nil {
 		return err
+	}
+	if c.GatewayKey == "" {
+		return errors.New("请输入 Magpie 网关 Key；本机默认 Key 为 magpie")
 	}
 	s.state.Config = c
 	return s.saveLocked()

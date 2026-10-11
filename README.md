@@ -76,7 +76,7 @@ magpie plugin add /absolute/path/to/magpie-intelligence-check
 ## 首次配置
 
 1. 在 Magpie 插件入口打开“本机质量检测控制台”。
-2. 在“Magpie 连接与预算”中确认网关 URL、Key 和日志路径。
+2. 点击右上角设置图标，在“连接与预算”中确认网关 URL、Key 和日志路径，保存后会验证连接。
 3. 点击“刷新模型”，选择完整模型 ID，例如 `provider/model`，添加监测目标。
 4. 先运行一次“牛奶推理”确认网关和探针可用。
 5. 从客户端发送一次该模型的业务请求，确认门禁、日志触发和检测流程正常。
@@ -87,7 +87,11 @@ magpie plugin add /absolute/path/to/magpie-intelligence-check
 - `$XDG_CONFIG_HOME/magpie/settings.json` 中的监听端口；
 - 默认地址 `http://127.0.0.1:3425`。
 
-发现只允许回环地址，并用 Key `magpie` 请求 `/v1/models` 验证连接。远程地址或其他 Key 需要在控制台手动填写。已有配置不会被自动覆盖。
+发现通过回环地址访问网关，并用 Key `magpie` 请求 `/v1/models` 验证连接。`0.0.0.0:端口`、`[::]:端口` 和 `:端口` 会转换为对应的本机地址。启动时在后台发现，不阻塞 Magpie 初始化；网关尚未就绪时每 5 秒重试。远程地址或其他 Key 需要在控制台手动填写。已有配置不会被自动覆盖。
+
+如果仍提示“请配置 Magpie 网关 URL 和 Key”，点击连接设置，填写 **Magpie 所在机器**可访问的网关地址，例如 `http://127.0.0.1:3425`，以及网关 Key（本机默认 `magpie`），再保存。它不是 Cloudflare 控制台域名，也不是上游供应商地址。Docker 中网关不在同一容器时，请填写容器可访问的实际地址与 Key。
+
+控制台提供模型监测、质量题库、模型指纹和检测记录四个视图；支持暗亮主题、手机操作、记录筛选、历史指纹批次和原始回答下载。自动刷新会保留未保存的设置与已展开的回答。
 
 只需要填写 Magpie 网关的 URL 和 Key，不需要重复填写各上游供应商凭据。
 
@@ -301,3 +305,4 @@ third_party/cloudflared/ Cloudflare 客户端许可文件
 ## 许可
 
 本项目采用 MIT License。Cloudflare 客户端相关许可随包保留在 `third_party/cloudflared/LICENSE`；ModelTrace 许可保留在 `third_party/modeltrace/LICENSE`。
+页面内置 Space Grotesk、Space Mono 字体和 Lucide 图标，无需运行时 CDN；许可分别保留在 `third_party/fonts/` 和 `third_party/lucide/LICENSE`。
