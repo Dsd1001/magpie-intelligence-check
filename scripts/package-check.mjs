@@ -9,7 +9,9 @@ for(const item of manifest.artifacts){
  const bytes=await fs.readFile(path.join(root,'dist',item.name));assert.equal(bytes.length,item.size);assert.equal(createHash('sha256').update(bytes).digest('hex'),item.sha256,item.name);
  if(item.name.endsWith('.tgz')){
   const listing=spawnSync('tar',['-tzf',path.join(root,'dist',item.name)],{encoding:'utf8'});assert.equal(listing.status,0);
-  for(const name of ['package.json','plugin/index.mjs','plugin/gate.middleware.js','plugin/cloudflared-runtime.mjs','third_party/cloudflared/LICENSE','README.md'])assert.ok(listing.stdout.includes('/'+name),`${item.name} missing ${name}`);
+  for(const name of ['package.json','assets/icon.png','assets/plugin-icon.png','plugin/index.mjs','plugin/gate.middleware.js','plugin/cloudflared-runtime.mjs','third_party/cloudflared/LICENSE','README.md'])assert.ok(listing.stdout.includes('/'+name),`${item.name} missing ${name}`);
+  const metadata=spawnSync('tar',['-xOzf',path.join(root,'dist',item.name),item.name.slice(0,-4)+'/package.json'],{encoding:'utf8'});assert.equal(metadata.status,0);
+  const pkg=JSON.parse(metadata.stdout);assert.equal(pkg.magpie.icon,'data:image/png;base64,'+(await fs.readFile(path.join(root,'assets/plugin-icon.png'))).toString('base64'));assert.ok(Buffer.byteLength(pkg.magpie.icon)<1024*1024);
   const prefix=item.name.slice(0,-4);const gate=spawnSync('tar',['-xOzf',path.join(root,'dist',item.name),prefix+'/plugin/gate.middleware.js'],{encoding:'utf8'});assert.equal(gate.stdout,'export function onRequest(body) { return body; }\n');
  }
 }
