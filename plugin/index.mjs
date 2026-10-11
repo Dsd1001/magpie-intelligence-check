@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { resolveCloudflared } from './cloudflared-runtime.mjs';
 import { discoverGateway } from './gateway-discovery.mjs';
+import { waitForConsole } from './console-readiness.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 let child, ready;
@@ -42,6 +43,15 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
       const binary=remote?await resolveCloudflared(options,options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check')):undefined;
       const r=await fetch(v.origin+'/api/console',{method:'POST',headers:{authorization:'Bearer '+v.control,'content-type':'application/json'},body:JSON.stringify({remote,binary})});
       if(!r.ok)throw Error(await r.text());const {url}=await r.json();
+      if(remote){
+        try { await waitForConsole(url); }
+        catch(error){
+          await fetch(v.origin+'/api/console/close',{method:'POST',headers:{authorization:'Bearer '+v.control,'content-type':'application/json'},body:'{}'}).catch(()=>{});
+          // The service delays tunnel shutdown to deliver its acknowledgement.
+          await new Promise(resolve=>setTimeout(resolve,350));
+          throw error;
+        }
+      }
       return { url, instructions: remote?'临时 HTTPS 入口最长 30 分钟，一次性链接十分钟有效。页面可结束远程访问。':'一次性链接十分钟有效；使用后重新从插件打开可获取新入口。', method: 'auto', callback: async () => ({ type: 'success', key: 'quality-control-only' }) };
     } })),
     async loader() { await start(options); return {}; }
@@ -58,6 +68,6 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
       if(discovered){const saved=await fetch(service.origin+'/api/config',{method:'POST',headers,body:JSON.stringify(discovered)});if(!saved.ok)throw Error('无法保存已验证的 Magpie 网关连接');}
     }
     cfg.provider ??= {};
-    cfg.provider['quality-check'] = { name: '模型质量检查', models: {} };
+    cfg.provider['quality-check'] = { name: 'Intelligence Check', models: {} };
   }
 }) };

@@ -11,6 +11,7 @@ for(const [goos,goarch] of platforms){
  const output=path.join(root,'dist',name);await mkdir(path.dirname(output),{recursive:true});
  const result=spawnSync('go',['build','-trimpath','-ldflags=-s -w','-o',output,'./cmd/quality-check'],{cwd:root,env:{...process.env,CGO_ENABLED:'0',GOOS:goos,GOARCH:goarch},stdio:'inherit'});
  if(result.status!==0)throw Error(`Build failed: ${name}`);
+ await mkdir(path.join(root,'bin'),{recursive:true});await copyFile(output,path.join(root,'bin',name));
  const bytes=await readFile(output);manifest.artifacts.push({name,goos,goarch,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
  const bundle=path.join(root,'dist',`magpie-intelligence-check-${goos}-${goarch}`);await mkdir(path.join(bundle,'bin'),{recursive:true});
  for(const entry of ['plugin','assets','third_party','package.json','README.md','LICENSE'])await cp(path.join(root,entry),path.join(bundle,entry),{recursive:true});

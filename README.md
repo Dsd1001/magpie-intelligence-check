@@ -28,6 +28,17 @@ Magpie 插件，用于对指定的主力模型做质量探针，并在探针未�
 
 ## 安装
 
+### 从 Magpie 的安装框添加
+
+在“已有想装的？”输入框填写：
+
+```text
+github:mu-zi-lee/magpie-intelligence-check
+```
+
+仓库包含五个平台的 Go 二进制，插件会按 Magpie 所在机器的系统和架构选择。
+供应商显示名为 **Intelligence Check**。更新后请重新安装插件并重新打开管理入口。
+
 ### 使用发行包
 
 发行包在 `dist/` 中，按平台提供完整插件目录和已编译的 Go 二进制：
@@ -111,6 +122,11 @@ magpie serve 2>> "$HOME/.local/state/magpie/gateway.log"
 
 插件优先使用 PATH 中已有的官方 `cloudflared`。找不到时，默认下载并校验固定版本 `2026.10.0`，缓存到数据目录的 `runtime/`，不需要 root，也不会修改系统 PATH。自动下载需要访问 GitHub 发行文件和 Cloudflare 隧道服务；可通过 `cloudflaredPath` 指定已有客户端，或关闭自动下载。
 
+远程入口会先等待公网 `/health` 就绪，最长 60 秒，再返回管理链接。
+如果出现 `502`，本轮就绪检查失败会关闭通道；检查网络后从插件重新打开。
+管理链接从外部页面打开时，使用 `HttpOnly`、`SameSite=Lax` 会话 Cookie 完成重定向；
+会话过期后需要从插件取得新链接。
+
 不要只打开临时域名首页，必须使用插件返回的完整 `/open/...` 链接。不要把管理端口直接绑定到公网。
 
 ## 检测规则
@@ -145,6 +161,24 @@ magpie serve 2>> "$HOME/.local/state/magpie/gateway.log"
 探针请求使用 Magpie 的 Chat Completions 接口，并把模型改写为内部别名 `quality-probe/<随机别名>/<完整模型 ID>`。门禁会放行这个内部别名，避免探针再次触发门禁。
 
 这些题目只是行为与能力线索，不是模型身份认证、供应商认证或通用智商排名。单题失败不能证明模型被替换；知识题有时效性，复述指纹也可能随版本变化。
+
+### ModelTrace 模型指纹
+
+控制台提供独立的 **ModelTrace 模型指纹** 检测。选择已启用监测的模型，点击“运行三条指纹挑战”，后台通过同一 Magpie 网关发送三次独立数字选择请求。每条要求生成 292–332 个 1–355 范围内的整数。
+
+- 每轮预留 3 次当日预算，不足时不发请求；没有自动复测；
+- 每条请求最多 180 秒，三条顺序执行；关闭浏览器不会中断后台采集；
+- 保存每条挑战原文、原始回答、token 用量和批次，刷新页面后仍可查看；
+- 三条回答都有效才展示归因；拒答、截断、调用失败或有效数字不足不会被当作模型异常；
+- 浏览器本地使用 ModelTrace 原版评分算法及固定候选库，展示候选模型排名和家族概率；
+- 不改变牛奶题的通过状态、人工暂停或临时放行。
+
+当前候选库含 GPT、Claude 两个家族的 18 个模型。概率是库内候选的闭集概率：
+即使真实模型不在库里，也会归到某个最相似候选，因此不能据此认证身份或自动封锁模型。
+渠道系统提示词和协议转换也可能改变输出分布。
+
+来源为 `xqy2006/ModelTrace`，固定提交和资源校验值见 `third_party/modeltrace/README.md`；
+采用 MIT 许可，评分代码与候选库嵌入 Go 二进制，无需 Python、外部评分服务或运行时下载。
 
 ## 状态与人工操作
 
@@ -239,6 +273,7 @@ node scripts/plugin-check.mjs
 node scripts/client-check.mjs
 node scripts/cloudflare-check.mjs
 node scripts/browser-check.mjs
+node scripts/auth-browser-check.mjs
 ```
 
 其中：
@@ -248,6 +283,7 @@ node scripts/browser-check.mjs
 - `client-check.mjs` 验证客户端能看到 `MAGPIE_QUALITY_REVIEW_REQUIRED` API 错误；
 - `cloudflare-check.mjs` 验证临时 HTTPS 入口、会话交换和关闭；
 - `browser-check.mjs` 需要 Playwright，可通过 `PLAYWRIGHT_MODULE` 指定模块位置。
+- `auth-browser-check.mjs` 使用真实浏览器验证从外部页面打开管理链接、票据重定向和会话刷新。
 
 ## 目录结构
 
@@ -264,4 +300,4 @@ third_party/cloudflared/ Cloudflare 客户端许可文件
 
 ## 许可
 
-本项目采用 MIT License。Cloudflare 客户端相关许可随包保留在 `third_party/cloudflared/LICENSE`。
+本项目采用 MIT License。Cloudflare 客户端相关许可随包保留在 `third_party/cloudflared/LICENSE`；ModelTrace 许可保留在 `third_party/modeltrace/LICENSE`。

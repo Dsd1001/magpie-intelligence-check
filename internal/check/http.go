@@ -19,6 +19,24 @@ func (s *Service) Handler(token string) http.Handler {
 }
 func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /modeltrace/{file}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("file")
+		if name != "fingerprint-core.js" && name != "unified_bank.json" && name != "panel.js" {
+			http.NotFound(w, r)
+			return
+		}
+		b, err := web.ReadFile("web/modeltrace/" + name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(name, ".js") {
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		w.Write(b)
+	})
 	mux.HandleFunc("POST /api/console", func(w http.ResponseWriter, r *http.Request) {
 		if console == nil {
 			http.Error(w, "控制台管理未启用", 503)
@@ -132,7 +150,9 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		var err error
-		if a.Action == "test" {
+		if a.Action == "modeltrace" {
+			err = s.TriggerModelTrace(a.Model)
+		} else if a.Action == "test" {
 			if a.Prompt == "" {
 				a.Prompt = "milk"
 			}
@@ -150,7 +170,13 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; connect-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'; connect-src 'self'")
+		// A public readiness probe exposes no management state or credentials.
+		if r.Method == "GET" && r.URL.Path == "/health" {
+			w.Header().Set("X-Magpie-Quality", "ready")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		supplied := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		cookie, e := r.Cookie("quality_session")
 		if e == nil && supplied == "" {
@@ -166,7 +192,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				http.Error(w, "管理链接已失效，请重新启动入口", 401)
 				return
 			}
-			http.SetCookie(w, &http.Cookie{Name: "quality_session", Value: session, Path: "/", HttpOnly: true, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", SameSite: http.SameSiteStrictMode, MaxAge: 1800})
+			http.SetCookie(w, &http.Cookie{Name: "quality_session", Value: session, Path: "/", HttpOnly: true, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", SameSite: http.SameSiteLaxMode, MaxAge: 1800})
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}

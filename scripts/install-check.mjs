@@ -18,7 +18,7 @@ try{
   const registration=spawnSync(process.env.MAGPIE_BINARY,['plugin','add',installed],{env,encoding:'utf8',timeout:90000});
   assert.equal(registration.status,0,registration.stdout+registration.stderr);
   const saved=JSON.parse(await fs.readFile(path.join(dir,'config','magpie','plugins.json'),'utf8'));assert.ok(saved.plugins.some(p=>p.spec===installed));
-  const listing=spawnSync(process.env.MAGPIE_BINARY,['plugin'],{env,encoding:'utf8',timeout:90000});assert.equal(listing.status,0,listing.stdout+listing.stderr);assert.match(listing.stdout+listing.stderr,/quality-check|质量检查|intelligence-check/);
+  const listing=spawnSync(process.env.MAGPIE_BINARY,['plugin'],{env,encoding:'utf8',timeout:90000});assert.equal(listing.status,0,listing.stdout+listing.stderr);assert.match(listing.stdout+listing.stderr,/quality-check|Intelligence Check|intelligence-check/);
   console.log('PASS: real Magpie registers extracted package and recognizes plugin');
  }
  console.log('PASS: extracted release plugin starts without Go, issues management tickets, and cleans up with host');

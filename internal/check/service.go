@@ -31,14 +31,17 @@ type Target struct {
 	Event      string    `json:"event"`
 }
 type Result struct {
-	ID      string    `json:"id"`
-	Model   string    `json:"model"`
-	Prompt  string    `json:"prompt"`
-	Answer  string    `json:"answer"`
-	Verdict string    `json:"verdict"`
-	Error   string    `json:"error,omitempty"`
-	Time    time.Time `json:"time"`
-	Tokens  int       `json:"tokens"`
+	ID            string    `json:"id"`
+	Model         string    `json:"model"`
+	Prompt        string    `json:"prompt"`
+	Answer        string    `json:"answer"`
+	Verdict       string    `json:"verdict"`
+	Error         string    `json:"error,omitempty"`
+	Time          time.Time `json:"time"`
+	Tokens        int       `json:"tokens"`
+	Batch         string    `json:"batch,omitempty"`
+	ExpectedCount int       `json:"expected_count,omitempty"`
+	PromptText    string    `json:"prompt_text,omitempty"`
 }
 type State struct {
 	Config  Config             `json:"config"`
@@ -85,6 +88,12 @@ func New(dir, gate string) (*Service, error) {
 		if t.State == "checking" {
 			t.State = "unavailable"
 			t.Reason = "检测服务重启，请重试"
+		}
+	}
+	for i := range s.state.Results {
+		if s.state.Results[i].Verdict == "running" {
+			s.state.Results[i].Verdict = "unavailable"
+			s.state.Results[i].Error = "检测服务重启，请重试"
 		}
 	}
 	if err := s.saveLocked(); err != nil {

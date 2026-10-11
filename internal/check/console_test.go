@@ -44,6 +44,9 @@ func TestConsoleTicketHTTP(t *testing.T) {
 	if len(cookies) != 1 {
 		t.Fatal("no session")
 	}
+	if cookies[0].SameSite != http.SameSiteLaxMode || !cookies[0].HttpOnly {
+		t.Fatal("console navigation cookie is not Lax and HttpOnly")
+	}
 	r = httptest.NewRequest("GET", "http://example.com/api/state", nil)
 	r.AddCookie(cookies[0])
 	w = httptest.NewRecorder()
