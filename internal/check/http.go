@@ -227,7 +227,7 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; connect-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; font-src 'self'; frame-ancestors 'none'; connect-src 'self'")
 		// A public readiness probe exposes no management state or credentials.
 		if r.Method == "GET" && r.URL.Path == "/health" {
 			w.Header().Set("X-Magpie-Quality", "ready")

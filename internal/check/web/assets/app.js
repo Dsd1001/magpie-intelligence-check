@@ -1,6 +1,7 @@
 import { $, text, icon, hydrateIcons, syncSelect, dateTime, names } from './ui.js';
 import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
 import { analyzeAnswer } from './answer-analysis.js';
+import { renderSVGPreview } from './svg-preview.js';
 
 let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
 const config = $('#config');
@@ -136,6 +137,7 @@ function renderTestAnswer() {
   const signature = JSON.stringify([record?.id, record?.answer, record?.error, record?.verdict]);
   if (analysisSignature !== signature) {
     analysisSignature = signature;
+    renderSVGPreview(record);
     const panel = $('#answerAnalysis'); panel.replaceChildren(); panel.hidden = !answer;
     if (answer) {
       panel.append(text('h3', '自动辅助检查'));
@@ -181,7 +183,7 @@ function renderTargets() {
       button.type = 'button'; button.append(icon(image));
       button.setAttribute('aria-label', `${name} ${target.model}`);
       button.dataset.tooltip = name; button.title = name;
-      button.disabled = !target.enabled || (action === 'test' && modelRunning(target.model));
+      button.disabled = (action !== 'test' && !target.enabled) || (action === 'test' && modelRunning(target.model));
       button.onclick = () => pending(button, async () => {
         if (action === 'test' && !requireGateway()) return;
         await request('/api/action', { model: target.model, action });
@@ -261,7 +263,7 @@ async function refresh() {
     $('#statPassed').textContent = targets.filter(validPass).length;
     $('#statReview').textContent = targets.filter(t => t.enabled && ['review', 'unavailable'].includes(t.state)).length;
     $('#statRequests').textContent = dayCount();
-    syncSelect($('#model'), targets.filter(t => t.enabled).map(t => [t.model, t.model]));
+    syncSelect($('#model'), targets.map(t => [t.model, t.model + (t.enabled ? '' : '（监测关闭）')]));
     syncSelect($('#prompt'), data.prompts.map(p => [p.id, p.name]));
     syncSelect($('#historyModel'), [['', '全部模型'], ...[...new Set([...targets.map(t => t.model), ...data.state.results.map(r => r.model)])].map(m => [m, m])]);
     showPrompt(); renderTargets(); renderControls(); renderHistory();

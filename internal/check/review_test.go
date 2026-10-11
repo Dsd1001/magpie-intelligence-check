@@ -1,11 +1,43 @@
 package check
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDisabledTargetAllowsManualTestsOnly(t *testing.T) {
+	s := fixture(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"manual answer"},"finish_reason":"stop"}]}`))
+	}))
+	defer up.Close()
+	s.Configure(Config{GatewayURL: up.URL, GatewayKey: "fixture", DailyLimit: 20})
+	s.SetTarget("a/solo", false)
+	if err := s.Trigger("a/solo", "repeat", false); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := s.Snapshot()
+	if len(state.Results) != 0 {
+		t.Fatal("disabled target auto-tested")
+	}
+	if err := s.Trigger("a/solo", "repeat", true); err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	if err := s.TriggerModelTrace("a/solo"); err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	state, _ = s.Snapshot()
+	if len(state.Results) != 4 || state.Targets["a/solo"].Enabled {
+		t.Fatal("manual test changed monitoring")
+	}
+}
 
 func TestReviewPersistsWithoutChangingVerdictOrGate(t *testing.T) {
 	s := fixture(t)

@@ -15,13 +15,14 @@ const info=await new Promise((resolve,reject)=>{child.stdout.on('data',b=>{outpu
 const browser=await chromium.launch({headless:true});
 let badFingerprint=false;
 let manualRun=0, truncated=false;
+let manualSVG;
 const upstream=http.createServer(async(req,res)=>{
  if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo'}]}));return;}
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);const count=Number(body.messages[0].content.match(/ (\d+) 个 1 到 355/)?.[1]);
  const numbers=Array.from({length:count},(_,i)=>(i*73%355)+1);
  res.setHeader('Content-Type','application/json');
- const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':!count?`回答 ${++manualRun}\n<script>window.answerExecuted=true</script>\n翻译结果：你好` :badFingerprint?'无法提供数字':numbers.join(',');
+ const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':!count?(manualSVG || `回答 ${++manualRun}\n<script>window.answerExecuted=true</script>\n翻译结果：你好`) :badFingerprint?'无法提供数字':numbers.join(',');
  if(!count)await new Promise(resolve=>setTimeout(resolve,700));
  res.end(JSON.stringify({choices:[{message:{content},finish_reason:truncated?'length':'stop'}],usage:{total_tokens:count||4}}));
 });
@@ -143,7 +144,25 @@ try{
  assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')),[]);console.log('PASS: configuration flow, seven prompts, two fingerprint batches, 18 candidates, preserved drafts/details, filters, keyboard, dark/light desktop and 320/390px mobile, transient 502 recovery');
  assert.equal(await page.locator('#message').textContent(),'','页面显示错误');
  await page.locator('#tab-models').click();
+ await page.getByRole('checkbox',{name:'监测 fixture/solo',exact:true}).uncheck();
+ await page.waitForFunction(()=>document.querySelector('#model').options[0]?.textContent.includes('监测关闭'));
+ await page.locator('#tab-tests').click();await page.locator('#prompt').selectOption('svg');
+ manualSVG='```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100"><script>window.previewExecuted=true</script><rect width="200" height="100" fill="red"/><image href="https://external.invalid/pixel.png"/></svg>\n```';
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#svgImage').naturalWidth===200,{},{timeout:15000});
+ assert.equal(await page.evaluate(()=>window.previewExecuted),undefined);
+ const pixels=await page.evaluate(()=>{
+  const canvas=document.createElement('canvas');canvas.width=200;canvas.height=100;
+  const ctx=canvas.getContext('2d');ctx.drawImage(document.querySelector('#svgImage'),0,0);
+  return [...ctx.getImageData(50,50,1,1).data];
+ });
+ assert.deepEqual(pixels,[255,0,0,255],'preview is not generated output');
+ await page.locator('#tab-models').click();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除 fixture/solo',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#targets').textContent.includes('添加一个模型'));
+ assert.equal(await page.locator('#model option').count(),0);
+ await page.locator('#target input').fill('fixture/readded');await page.locator('#target button').last().click();
+ await page.waitForFunction(()=>document.querySelector('#model').value==='fixture/readded');
+ assert.equal(await page.locator('#traceModel').inputValue(),'fixture/readded');
  await page.locator('#tab-history').click();assert.ok(await page.locator('#results details').count()>0,'delete erased history');
 }finally{await browser.close();await new Promise(resolve=>upstream.close(resolve));const exited=new Promise(r=>child.once('exit',r));child.stdin.end();await exited;await fs.rm(dir,{recursive:true,force:true})}

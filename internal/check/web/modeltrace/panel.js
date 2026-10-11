@@ -15,7 +15,7 @@ export function renderModelTrace(data) {
   if (!data) return;
   latestData = data;
   const select = $('#traceModel');
-  syncSelect(select, Object.values(data.state.targets).filter(t => t.enabled).map(t => [t.model, t.model]));
+  syncSelect(select, Object.values(data.state.targets).map(t => [t.model, t.model + (t.enabled ? '' : '（监测关闭）')]));
   const records = data.state.results.filter(r => r.prompt === 'modeltrace' && r.model === select.value);
   const batches = [...new Set(records.map(r => r.batch))].reverse();
   syncSelect($('#traceBatch'), [['', '最新批次'], ...batches.map(batch => [batch, dateTime(records.find(r => r.batch === batch).time)])]);

@@ -47,8 +47,8 @@ func (s *Service) TriggerModelTrace(model string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.state.Targets[model]
-	if t == nil || !t.Enabled {
-		return errors.New("模型未启用监测")
+	if t == nil {
+		return errors.New("模型未配置")
 	}
 	if s.running[model] {
 		return errors.New("该模型已有检测进行中，请完成后重试")

@@ -283,8 +283,11 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.state.Targets[model]
-	if t == nil || !t.Enabled {
-		return errors.New("模型未启用监测")
+	if t == nil {
+		return errors.New("模型未配置")
+	}
+	if !t.Enabled && !manual {
+		return nil
 	}
 	if s.running[model] {
 		if manual {
