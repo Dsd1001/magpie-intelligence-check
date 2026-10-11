@@ -1,0 +1,50 @@
+name: 题库反馈 / Test Question Feedback
+description: 反馈现有题目是否有效，或推荐新的可用测试题，由维护者审核添加。
+title: "[题库] "
+body:
+  - type: markdown
+    attributes:
+      value: "欢迎分享实际测试结果。请勿包含 API Key、管理链接或私人对话；无需为反馈专门重复付费测试。题目由维护者审核后手动添加，不会自动进入门禁。"
+  - type: dropdown
+    id: feedback_type
+    attributes:
+      label: 反馈类型 / Feedback Type
+      options:
+        - 现有题目仍有效
+        - 现有题目失效或有争议
+        - 推荐新的测试题
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: 题目原文与来源 / Question And Source
+      description: 现有题目请填写名称或 ID；推荐新题请提供完整提示词与来源，原创请注明。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 测试环境 / Test Environment
+      description: 模型 ID、版本或测试日期、渠道，以及额外系统提示词（如有）。不确定的信息可注明未知。
+    validations:
+      required: true
+  - type: textarea
+    id: answer
+    attributes:
+      label: 原始回答 / Original Answer
+      description: 提供已有的匿名化回答；若尚未测试，请明确注明。
+    validations:
+      required: true
+  - type: textarea
+    id: evaluation
+    attributes:
+      label: 评价标准与有效性 / Evaluation And Usefulness
+      description: 预期答案或人工评价标准；为什么认为有效或无效，有对照测试可一并提供。
+    validations:
+      required: true
+  - type: textarea
+    id: limitations
+    attributes:
+      label: 已知限制 / Limitations
+      description: 时效性、多个合理答案、误判情况或其他注意事项。

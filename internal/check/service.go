@@ -42,7 +42,57 @@ type Result struct {
 	Batch         string    `json:"batch,omitempty"`
 	ExpectedCount int       `json:"expected_count,omitempty"`
 	PromptText    string    `json:"prompt_text,omitempty"`
+	Review        string    `json:"review,omitempty"`
+	ReviewNote    string    `json:"review_note,omitempty"`
+	ReviewedAt    time.Time `json:"reviewed_at,omitempty"`
 }
+
+func (s *Service) ReviewResult(id, decision, note string) error {
+	if decision != "accepted" && decision != "rejected" && decision != "pending" {
+		return errors.New("无效审核结论")
+	}
+	if len(note) > 4000 {
+		return errors.New("审核备注不能超过 4000 字节")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.state.Results {
+		r := &s.state.Results[i]
+		if r.ID != id {
+			continue
+		}
+		if r.Verdict == "running" || r.Answer == "" {
+			return errors.New("尚无可审核的回答")
+		}
+		previous := *r
+		r.Review, r.ReviewNote, r.ReviewedAt = decision, note, time.Now()
+		if err := s.store.Save(s.state); err != nil {
+			*r = previous
+			return err
+		}
+		return nil
+	}
+	return errors.New("检测记录不存在")
+}
+
+func (s *Service) DeleteTarget(model string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running[model] {
+		return errors.New("模型正在检测，请完成后再删除")
+	}
+	t, ok := s.state.Targets[model]
+	if !ok {
+		return errors.New("模型未配置")
+	}
+	delete(s.state.Targets, model)
+	if err := s.saveLocked(); err != nil {
+		s.state.Targets[model] = t
+		return err
+	}
+	return nil
+}
+
 type State struct {
 	Config  Config             `json:"config"`
 	Targets map[string]*Target `json:"targets"`
@@ -237,6 +287,9 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 		return errors.New("模型未启用监测")
 	}
 	if s.running[model] {
+		if manual {
+			return errors.New("该模型已有检测进行中，请完成后重试")
+		}
 		return nil
 	}
 	if !manual && (t.State == "review" || t.AllowUntil.After(time.Now()) || t.State == "passed" && time.Since(t.CheckedAt) < 15*time.Minute) {
@@ -251,6 +304,16 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	}
 	if s.state.Config.GatewayURL == "" || s.state.Config.GatewayKey == "" {
 		return errors.New("请配置 Magpie 网关 URL 和 Key")
+	}
+	count := 0
+	day := time.Now().UTC().Format("2006-01-02")
+	for _, r := range s.state.Results {
+		if r.Model == model && r.Time.UTC().Format("2006-01-02") == day {
+			count++
+		}
+	}
+	if count >= s.state.Config.DailyLimit {
+		return errors.New("每日请求预算已耗尽")
 	}
 	previous := t.State
 	if p.Automatic {
@@ -289,7 +352,7 @@ func (s *Service) run(model string, p Prompt) {
 			reason = "每日请求预算已耗尽"
 			break
 		}
-		r := Result{ID: Secret()[:12], Model: model, Prompt: p.ID, Time: time.Now(), Verdict: "running"}
+		r := Result{ID: Secret()[:12], Model: model, Prompt: p.ID, PromptText: p.Text, Time: time.Now(), Verdict: "running"}
 		s.state.Results = append(s.state.Results, r)
 		idx := len(s.state.Results) - 1
 		err := s.store.Save(s.state)

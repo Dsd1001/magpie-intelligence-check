@@ -1,5 +1,6 @@
 import { $, text, icon, hydrateIcons, syncSelect, dateTime, names } from './ui.js';
 import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
+import { analyzeAnswer } from './answer-analysis.js';
 
 let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
 const config = $('#config');
@@ -7,6 +8,9 @@ const secretType = 'pass' + 'word';
 config.elements.gateway_key.type = secretType;
 config.elements.gateway_key.autocomplete = 'new-' + secretType;
 let configDirty = false;
+let awaitingTest;
+const testErrors = new Map();
+let shownRecord, reviewDirty = false, analysisSignature;
 hydrateIcons();
 
 function feedback(value, success = false) {
@@ -94,8 +98,52 @@ function modelRunning(model) { return data?.state.results?.some(r => r.model ===
 function renderControls() {
   if (!data) return;
   $('#run').disabled = $('#run').hasAttribute('aria-busy') || !$('#model').value || modelRunning($('#model').value);
-  $('#testStatus').textContent = modelRunning($('#model').value) ? '检测进行中，请等待回答。' : '';
+  renderTestAnswer();
   renderModelTrace(data);
+}
+function renderTestAnswer() {
+  if (!data) return;
+  const model = $('#model').value, prompt = $('#prompt').value;
+  const submissionError = testErrors.get(JSON.stringify([model, prompt]));
+  const records = data.state.results.filter(r => r.model === model && r.prompt === prompt).reverse();
+  if (awaitingTest?.model === model && awaitingTest.prompt === prompt && records.some(r => !awaitingTest.ids.has(r.id))) awaitingTest = undefined;
+  const waiting = awaitingTest?.model === model && awaitingTest.prompt === prompt;
+  syncSelect($('#testRecord'), [['', '最新回答'], ...records.map(r => [r.id, `${dateTime(r.time)} / ${names[r.verdict] || r.verdict}`])]);
+  $('#testRecord').disabled = waiting || !records.length;
+  const record = waiting ? undefined : records.find(r => r.id === $('#testRecord').value) || records[0];
+  const running = waiting || record?.verdict === 'running';
+  const answer = record?.answer || '';
+  $('#testStatus').textContent = running ? '检测进行中，等待完整回答（最长 180 秒）。' : record ? record.verdict === 'unavailable' ? '检测未完成' : '检测完成' : modelRunning(model) ? '该模型正在运行其他检测。' : '';
+  $('#testStatus').className = 'inline-state' + (record?.verdict === 'unavailable' ? ' error' : '');
+  $('#answerMeta').textContent = record ? `${record.model} / ${dateTime(record.time)} / ${names[record.verdict] || record.verdict} / ${record.tokens || 0} tokens` : model ? `${model} / ${data.prompts.find(p => p.id === prompt)?.name || ''}` : '尚未选择测试模型';
+  $('#answerError').hidden = !record?.error && !submissionError;
+  $('#answerError').textContent = submissionError || record?.error || '';
+  const content = answer || (running ? '正在等待模型回答…' : record ? record.error ? '本次请求未返回回答正文。' : '本次回答为空。' : '当前模型和题目暂无回答');
+  if ($('#testAnswer').textContent !== content) $('#testAnswer').textContent = content;
+  $('#testAnswer').setAttribute('aria-busy', String(Boolean(running)));
+  $('#copyAnswer').disabled = !answer;
+  $('#downloadAnswer').hidden = !answer;
+  if (record) $('#downloadAnswer').href = '/api/results/' + encodeURIComponent(record.id) + '/download';
+  const review = $('#answerReview');
+  review.hidden = !answer || running;
+  if (shownRecord !== record?.id) { reviewDirty = false; $('#reviewMessage').textContent = ''; }
+  shownRecord = record?.id;
+  if (record && !reviewDirty) {
+    review.elements.decision.value = record.review || 'pending';
+    review.elements.note.value = record.review_note || '';
+  }
+  $('#reviewStatus').textContent = record?.review ? ({ accepted: '已确认通过', rejected: '已标记问题', pending: '待确认' }[record.review] + ' / ' + dateTime(record.reviewed_at)) : '未审核';
+  const signature = JSON.stringify([record?.id, record?.answer, record?.error, record?.verdict]);
+  if (analysisSignature !== signature) {
+    analysisSignature = signature;
+    const panel = $('#answerAnalysis'); panel.replaceChildren(); panel.hidden = !answer;
+    if (answer) {
+      panel.append(text('h3', '自动辅助检查'));
+      for (const [label, value] of analyzeAnswer(record, data.prompts.find(p => p.id === prompt))) {
+        const row = text('div', '', 'analysis-row'); row.append(text('span', label, 'muted'), text('span', value)); panel.append(row);
+      }
+    }
+  }
 }
 function showPrompt() {
   $('#promptText').textContent = data?.prompts.find(p => p.id === $('#prompt').value)?.text || '';
@@ -152,6 +200,13 @@ function renderTargets() {
       finally { input.disabled = false; }
     };
     toggle.append(input, text('span', '', 'toggle-track')); tools.append(toggle); actions.append(tools);
+    const remove = text('button', '', 'icon-button'); remove.append(icon('Trash2'));
+    remove.setAttribute('aria-label', `删除 ${target.model}`); remove.dataset.tooltip = '删除监测目标'; remove.disabled = modelRunning(target.model);
+    remove.onclick = () => {
+      if (!confirm(`删除 ${target.model}？该模型将不再受监测门禁限制，历史记录保留。`)) return;
+      pending(remove, async () => { await request('/api/target/delete', { model: target.model }); feedback('已删除监测目标，历史记录保留', true); await refresh(); });
+    };
+    tools.append(remove);
     row.append(model, status, checked, budget, actions);
     return row;
   });
@@ -175,7 +230,9 @@ function renderHistory() {
     const summary = text('summary', '', 'history-summary');
     summary.append(text('span', dateTime(record.time), 'record-date'), text('span', record.model, 'record-model model-id'), text('span', data.prompts.find(p => p.id === record.prompt)?.name || 'ModelTrace', 'record-type'), text('span', names[record.verdict] || record.verdict, 'state ' + record.verdict), text('span', `${record.tokens || 0} tokens`, 'record-tokens numeric'));
     const body = text('div', '', 'record-body');
-    body.append(text('pre', record.error || record.answer || '等待回答'));
+    if (record.error) body.append(text('p', record.error, 'inline-state error'));
+    if (record.review) body.append(text('p', `人工审核：${({accepted:'确认通过', rejected:'标记问题', pending:'待确认'})[record.review]}${record.review_note ? ' / ' + record.review_note : ''}`, 'inline-state'));
+    body.append(text('pre', record.answer || (record.verdict === 'running' ? '等待回答' : '未返回回答正文')));
     const download = text('a', '下载原始回答', 'download'); download.prepend(icon('Download'));
     download.href = '/api/results/' + encodeURIComponent(record.id) + '/download'; body.append(download);
     const prompt = record.prompt_text || data.prompts.find(p => p.id === record.prompt)?.text;
@@ -214,14 +271,42 @@ async function refresh() {
     $('#health').textContent = '连接中断'; $('#health').className = 'service-state warning';
   } finally { polling = false; }
 }
-$('#prompt').onchange = showPrompt;
-$('#model').onchange = renderControls;
+function changeTest() { $('#testRecord').value = ''; showPrompt(); renderControls(); }
+$('#prompt').onchange = changeTest;
+$('#model').onchange = changeTest;
+$('#testRecord').onchange = renderTestAnswer;
+$('#answerReview').oninput = () => { reviewDirty = true; };
+$('#answerReview').onsubmit = event => {
+  event.preventDefault();
+  const id = shownRecord;
+  const values = Object.fromEntries(new FormData(event.target));
+  pending(event.target.querySelector('button'), async () => {
+    await request('/api/results/' + encodeURIComponent(id) + '/review', values);
+    if (shownRecord === id) { reviewDirty = false; $('#reviewMessage').textContent = '审核已保存'; }
+    await refresh();
+  }, $('#reviewMessage'));
+};
+$('#copyAnswer').onclick = () => pending($('#copyAnswer'), async () => {
+  await navigator.clipboard.writeText($('#testAnswer').textContent);
+  feedback('回答已复制', true);
+});
 $('#historyModel').onchange = $('#historyVerdict').onchange = () => { historyLimit = 30; renderHistory(); };
 $('#loadHistory').onclick = () => { historyLimit += 30; renderHistory(); };
 $('#run').onclick = () => pending($('#run'), async () => {
   if (!requireGateway()) return;
-  await request('/api/action', { model: $('#model').value, action: 'test', prompt: $('#prompt').value });
-  feedback('已开始检测', true); await refresh();
+  const model = $('#model').value, prompt = $('#prompt').value;
+  testErrors.delete(JSON.stringify([model, prompt]));
+  awaitingTest = { model, prompt, ids: new Set(data.state.results.map(r => r.id)) };
+  $('#testRecord').value = ''; renderTestAnswer();
+  try {
+    await request('/api/action', { model, action: 'test', prompt });
+    feedback('已开始检测', true); await refresh();
+  } catch (error) {
+    awaitingTest = undefined;
+    testErrors.set(JSON.stringify([model, prompt]), error.message);
+    renderTestAnswer();
+    throw error;
+  }
 });
 $('#traceRun').onclick = () => pending($('#traceRun'), async () => {
   if (!requireGateway()) return;

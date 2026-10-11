@@ -58,6 +58,17 @@ try {
   });
   assert.equal(plugins.status, 200);
   assert.match(await plugins.text(), /Intelligence Check/);
+  const signin = await fetch(new URL('/api/plugin-signin', link), {
+    method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: new URL(link).origin },
+    body: JSON.stringify({ provider: 'quality-check', method: 0 }), signal: AbortSignal.timeout(10000),
+  });
+  assert.equal(signin.status, 200);
+  const flow = await signin.json();
+  assert.ok(flow.url?.includes('/open/'), 'full management link missing');
+  assert.equal(flow.pasteCode, true, 'management flow auto-completed');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const status = await fetch(new URL('/api/signin/' + flow.id, link), { headers: { cookie }, signal: AbortSignal.timeout(5000) });
+  assert.equal((await status.json()).state, 'waiting', 'management link collapsed into provider login');
   let state;
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {

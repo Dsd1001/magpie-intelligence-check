@@ -115,6 +115,33 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		w.Header().Set("Content-Disposition", `attachment; filename="result-`+result.ID+`.txt"`)
 		io.WriteString(w, result.Answer)
 	})
+	mux.HandleFunc("POST /api/results/{id}/review", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Decision string `json:"decision"`
+			Note     string `json:"note"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.ReviewResult(r.PathValue("id"), input.Decision, input.Note); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/target/delete", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Model string `json:"model"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.DeleteTarget(input.Model); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET /api/models", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		cfg := s.state.Config

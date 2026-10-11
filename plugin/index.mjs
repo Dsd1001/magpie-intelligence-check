@@ -52,7 +52,7 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
           throw error;
         }
       }
-      return { url, instructions: remote?'临时 HTTPS 入口最长 30 分钟，一次性链接十分钟有效。页面可结束远程访问。':'一次性链接十分钟有效；使用后重新从插件打开可获取新入口。', method: 'auto', callback: async () => ({ type: 'success', key: 'quality-control-only' }) };
+      return { url, instructions: `完整管理链接：${url}\n复制链接后在浏览器打开。链接十分钟内有效且只能使用一次。此入口不是供应商登录，无需提交验证码；使用后可以取消此窗口。${remote ? '临时通道最长 30 分钟。' : ''}`, method: 'code', callback: async () => ({ type: 'failed' }) };
     } })),
     async loader() { await start(options); return {}; }
   },

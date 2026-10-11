@@ -14,14 +14,16 @@ let output='';
 const info=await new Promise((resolve,reject)=>{child.stdout.on('data',b=>{output+=b;const i=output.indexOf('\n');if(i>=0)resolve(JSON.parse(output.slice(0,i)))});child.once('error',reject)});
 const browser=await chromium.launch({headless:true});
 let badFingerprint=false;
+let manualRun=0, truncated=false;
 const upstream=http.createServer(async(req,res)=>{
  if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'fixture/solo'}]}));return;}
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);const count=Number(body.messages[0].content.match(/ (\d+) 个 1 到 355/)?.[1]);
  const numbers=Array.from({length:count},(_,i)=>(i*73%355)+1);
  res.setHeader('Content-Type','application/json');
- const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':badFingerprint?'无法提供数字':numbers.join(',');
- res.end(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}],usage:{total_tokens:count||4}}));
+ const content=body.messages[0].content.startsWith('A previously isolated')?'46.24 inches':!count?`回答 ${++manualRun}\n<script>window.answerExecuted=true</script>\n翻译结果：你好` :badFingerprint?'无法提供数字':numbers.join(',');
+ if(!count)await new Promise(resolve=>setTimeout(resolve,700));
+ res.end(JSON.stringify({choices:[{message:{content},finish_reason:truncated?'length':'stop'}],usage:{total_tokens:count||4}}));
 });
 await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
 try{
@@ -41,6 +43,33 @@ try{
  assert.equal(await page.locator('#config input[name=gateway_key]').inputValue(),'');
  await page.keyboard.press('Escape');
  assert.equal(await page.locator('#settingsDialog').evaluate(el=>el.open),false);
+ await page.locator('#run').click();
+ assert.match(await page.locator('#testAnswer').textContent(),/等待/);
+ await page.waitForFunction(()=>document.querySelector('#testAnswer').textContent.includes('回答 1'),{},{timeout:15000});
+ assert.equal(await page.evaluate(()=>window.answerExecuted),undefined,'executed model HTML');
+ assert.equal(await page.locator('#copyAnswer').isEnabled(),true);
+ assert.match(await page.locator('#answerAnalysis').textContent(),/逐字覆盖/);
+ await page.locator('#answerReview select').selectOption('accepted');
+ await page.locator('#answerReview textarea').fill('已核对原始输出');
+ await page.waitForTimeout(3200);assert.equal(await page.locator('#answerReview textarea').inputValue(),'已核对原始输出');
+ await page.locator('#answerReview button').click();
+ await page.waitForFunction(()=>document.querySelector('#reviewStatus').textContent.includes('已确认通过'));
+ const original=await context.request.get(info.origin+await page.locator('#downloadAnswer').getAttribute('href'));
+ assert.match(await original.text(),/翻译结果：你好/);
+ await page.locator('#prompt').selectOption('japan');assert.match(await page.locator('#testAnswer').textContent(),/暂无回答/);
+ await page.locator('#prompt').selectOption('repeat');assert.match(await page.locator('#testAnswer').textContent(),/回答 1/);
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#testAnswer').textContent.includes('回答 2'),{},{timeout:15000});
+ const firstRecord=await page.locator('#testRecord option').last().getAttribute('value');
+ await page.locator('#testRecord').selectOption(firstRecord);assert.match(await page.locator('#testAnswer').textContent(),/回答 1/);
+ assert.equal(await page.locator('#answerReview select').inputValue(),'accepted');
+ await page.reload();await page.waitForSelector('#prompt option',{state:'attached'});await page.locator('#tab-tests').click();
+ await page.locator('#prompt').selectOption('repeat');assert.match(await page.locator('#testAnswer').textContent(),/回答 2/);
+ truncated=true;
+ await page.locator('#run').click();
+ await page.waitForFunction(()=>document.querySelector('#answerError').textContent.includes('截断'),{},{timeout:15000});
+ assert.match(await page.locator('#testAnswer').textContent(),/回答 3/,'lost partial answer');
+ truncated=false;
  await page.locator('#tab-fingerprint').click();
  await page.locator('#traceRun').click();
  await page.waitForFunction(()=>document.querySelector('#traceResults').textContent.includes('最相似候选'),{},{timeout:15000});
@@ -73,7 +102,7 @@ try{
  await page.waitForTimeout(3200);
  assert.equal(await page.locator('#results details').first().evaluate(el=>el.open),true,'poll collapsed answer');
  await page.locator('#historyVerdict').selectOption('failed');assert.match(await page.locator('#results').textContent(),/暂无/);
- await page.locator('#historyVerdict').selectOption('manual');assert.equal(await page.locator('#results details').count(),9);
+ await page.locator('#historyVerdict').selectOption('manual');assert.equal(await page.locator('#results details').count(),11);
  const download=await page.locator('#results a.download').first().getAttribute('href');
  const answer=await context.request.get(info.origin+download);assert.equal(answer.status(),200);assert.ok((await answer.text()).length>0);
  await page.locator('#settings').click();
@@ -113,4 +142,8 @@ try{
  }
  assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')),[]);console.log('PASS: configuration flow, seven prompts, two fingerprint batches, 18 candidates, preserved drafts/details, filters, keyboard, dark/light desktop and 320/390px mobile, transient 502 recovery');
  assert.equal(await page.locator('#message').textContent(),'','页面显示错误');
+ await page.locator('#tab-models').click();
+ page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除 fixture/solo',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('#targets').textContent.includes('添加一个模型'));
+ await page.locator('#tab-history').click();assert.ok(await page.locator('#results details').count()>0,'delete erased history');
 }finally{await browser.close();await new Promise(resolve=>upstream.close(resolve));const exited=new Promise(r=>child.once('exit',r));child.stdin.end();await exited;await fs.rm(dir,{recursive:true,force:true})}

@@ -56,8 +56,19 @@
       <button id="run" class="primary"><i data-icon="Play"></i><span>运行所选题目</span></button>
     </div>
     <p id="testStatus" class="inline-state" role="status"></p>
+    <div class="answer-heading"><h2>模型回答</h2><div class="answer-tools"><label><span class="sr-only">回答记录</span><select id="testRecord" aria-label="回答记录"></select></label><button id="copyAnswer" class="icon-button" aria-label="复制回答" data-tooltip="复制回答" data-icon="Copy" disabled></button><a id="downloadAnswer" class="icon-button" aria-label="下载回答" title="下载回答" hidden><i data-icon="Download"></i></a></div></div>
+    <p id="answerMeta" class="meta"></p>
+    <p id="answerError" class="inline-state error" role="alert" hidden></p>
+    <pre id="testAnswer" tabindex="0">当前模型和题目暂无回答</pre>
+    <div id="answerAnalysis" class="answer-analysis" hidden></div>
+    <form id="answerReview" class="answer-review" hidden>
+      <div class="section-heading"><h2>人工审核</h2><span id="reviewStatus" class="meta"></span></div>
+      <div class="review-fields"><label>审核结论<select name="decision"><option value="pending">待确认</option><option value="accepted">确认通过</option><option value="rejected">标记问题</option></select></label><label>审核备注<textarea name="note" rows="3" maxlength="1000" placeholder="记录判断依据或待复核的问题"></textarea></label></div>
+      <div class="dialog-actions"><span class="meta">审核仅记录评价，不改变模型门禁。</span><button class="primary"><i data-icon="Check"></i>保存审核</button></div>
+      <p id="reviewMessage" class="inline-state" role="status"></p>
+    </form>
     <div class="test-content">
-      <div><details open><summary>提示词原文</summary><pre id="promptText"></pre></details></div>
+      <div><details><summary>提示词原文</summary><pre id="promptText"></pre></details></div>
       <aside class="guidance"><h3>结果参考与限制</h3><p id="guidance"></p></aside>
     </div>
   </section>
