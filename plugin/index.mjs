@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -10,7 +11,12 @@ let child, ready;
 function start(options = {}) {
   if (ready) return ready;
   ready = new Promise((resolve, reject) => {
-    const binary = options.binaryPath || path.join(root, 'bin', process.platform === 'win32' ? 'quality-check.exe' : 'quality-check');
+    const platform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform] || process.platform;
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch] || process.arch;
+    const suffix = platform === 'windows' ? '.exe' : '';
+    const bundled = path.join(root, 'bin', `quality-check-${platform}-${arch}${suffix}`);
+    const fallback = path.join(root, 'bin', `quality-check${suffix}`);
+    const binary = options.binaryPath || (requireFile(bundled) ? bundled : fallback);
     const args=['-data', options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check'), '-gate', path.join(root, 'plugin', 'gate.middleware.js'),'-owned'];
     if(options.cloudflaredPath)args.push('-cloudflared',options.cloudflaredPath);
     child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -23,6 +29,9 @@ function start(options = {}) {
     child.once('exit', () => { clearTimeout(timer); ready = undefined; reject(new Error('检测后台已退出')); });
   });
   return ready;
+}
+function requireFile(file) {
+  return existsSync(file);
 }
 process.once('exit', () => child?.kill());
 export default { id: 'quality-check', server: async (_input, options = {}) => ({
