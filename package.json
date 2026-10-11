@@ -1,0 +1,9 @@
+{
+  "name": "magpie-intelligence-check",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./plugin/index.mjs",
+  "files": ["plugin", "bin", "third_party", "README.md", "LICENSE"],
+  "magpie": { "middleware": "./plugin/gate.middleware.js" },
+  "scripts": { "test": "go test -race ./...", "test:plugin": "node --test plugin/*.test.mjs", "build:release": "node scripts/build-release.mjs", "test:magpie": "node scripts/magpie-integration.mjs", "test:install": "node scripts/install-check.mjs", "test:clients": "node scripts/client-check.mjs" }
+}

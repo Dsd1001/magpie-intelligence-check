@@ -1,0 +1,6 @@
+/bin/
+/dist/
+/artifacts/
+/data/
+/node_modules/
+*.tmp
