@@ -1,6 +1,6 @@
 {
   "name": "magpie-intelligence-check",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [

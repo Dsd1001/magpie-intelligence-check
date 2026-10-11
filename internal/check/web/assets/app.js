@@ -2,6 +2,7 @@ import { $, text, icon, hydrateIcons, syncSelect, dateTime, names } from './ui.j
 import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
 import { analyzeAnswer } from './answer-analysis.js';
 import { renderSVGPreview } from './svg-preview.js';
+import { renderHTMLPreview } from './html-preview.js';
 
 let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
 const config = $('#config');
@@ -138,6 +139,7 @@ function renderTestAnswer() {
   if (analysisSignature !== signature) {
     analysisSignature = signature;
     renderSVGPreview(record);
+    renderHTMLPreview(record);
     const panel = $('#answerAnalysis'); panel.replaceChildren(); panel.hidden = !answer;
     if (answer) {
       panel.append(text('h3', '自动辅助检查'));

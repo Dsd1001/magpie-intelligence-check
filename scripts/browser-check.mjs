@@ -157,6 +157,37 @@ try{
   return [...ctx.getImageData(50,50,1,1).data];
  });
  assert.deepEqual(pixels,[255,0,0,255],'preview is not generated output');
+ await page.locator('#prompt').selectOption('html');
+ manualSVG='```html\n<!DOCTYPE html><html><body style="margin:0"><canvas id="live" width="200" height="100"></canvas><button onclick="document.body.dataset.clicked=1">Test</button><script>window.started=Date.now();try{parent.document.body.dataset.escaped=1}catch(e){window.isolated=true}try{localStorage.setItem("escape","1")}catch(e){window.storageBlocked=true}fetch("/api/state").catch(()=>window.networkBlocked=true);let n=0;setInterval(()=>{const c=document.querySelector("canvas").getContext("2d");c.fillStyle=(++n%2)?"red":"blue";c.fillRect(0,0,200,100)},100);</script></body></html>\n```';
+ await page.locator('#run').click();
+ const live=page.frameLocator('#htmlFrameHost iframe');
+ await live.locator('#live').waitFor({timeout:15000});
+ await page.waitForTimeout(250);
+ assert.equal(await live.locator('body').evaluate(()=>window.isolated&&window.storageBlocked&&window.networkBlocked),true,'preview escaped isolation');
+ assert.equal(await page.evaluate(()=>document.body.dataset.escaped),undefined);
+ const start=await live.locator('body').evaluate(()=>window.started);
+ const colors=new Set();
+ for(let i=0;i<6;i++){
+  colors.add(await live.locator('#live').evaluate(c=>[...c.getContext('2d').getImageData(50,50,1,1).data].join(',')));
+  await page.waitForTimeout(75);
+ }
+ assert.equal(colors.size,2,'HTML canvas animation did not move');
+ await live.getByRole('button',{name:'Test',exact:true}).click();
+ assert.equal(await live.locator('body').getAttribute('data-clicked'),'1');
+ await page.waitForTimeout(3200);
+ assert.equal(await live.locator('body').evaluate(()=>window.started),start,'poll restarted HTML');
+ for(const width of [1280,390,320]){
+  await page.setViewportSize({width,height:900});
+  await page.locator('#htmlPreview').screenshot({path:path.join(root,'artifacts',`html-preview-${width}.png`)});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'HTML preview overflow');
+ }
+ await page.locator('#stopHTML').click();assert.equal(await page.locator('#htmlFrameHost iframe').count(),0);
+ await page.waitForTimeout(3200);assert.equal(await page.locator('#htmlFrameHost iframe').count(),0,'poll resumed stopped preview');
+ await page.locator('#reloadHTML').click();await live.locator('#live').waitFor();
+ assert.notEqual(await live.locator('body').evaluate(()=>window.started),start);
+ await page.locator('#prompt').selectOption('svg');assert.equal(await page.locator('#htmlFrameHost iframe').count(),0);
+ assert.deepEqual(errors.filter(e=>!e.includes('502 (Bad Gateway)')&&!/Connecting to .*violates|Fetch API cannot load/.test(e)),[]);
+ console.log('PASS: HTML inline animation, canvas pixels, interaction, origin/storage/network isolation, stable polling, stop/reload and 320/390/1280px previews');
  await page.locator('#tab-models').click();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'删除 fixture/solo',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('#targets').textContent.includes('添加一个模型'));

@@ -31,7 +31,7 @@ export function renderSVGPreview(record) {
   if (activeURL) URL.revokeObjectURL(activeURL);
   activeURL = undefined;
   panel.hidden = true;
-  if (!record?.answer || !['svg', 'html'].includes(record.prompt)) return;
+  if (!record?.answer || record.prompt !== 'svg') return;
   try {
     const svg = extractSVG(record.answer);
     if (!svg) return;
