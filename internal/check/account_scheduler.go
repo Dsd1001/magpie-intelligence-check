@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	accountNormalInterval  = 4 * time.Hour
-	accountSuspectInterval = 30 * time.Minute
-	accountRetryInterval   = 1 * time.Hour
+	accountNormalInterval      = time.Hour
+	accountSuspectInterval     = 2 * time.Minute
+	accountQuarantinedInterval = 4 * time.Hour
+	accountRetryInterval       = time.Hour
 )
 
 // AccountScheduleEnabled is separate from production-key modification.
@@ -27,7 +28,13 @@ func (s *Service) AccountScheduleEnabled(enabled bool) error {
 	return nil
 }
 
-func dueAccountTarget(t *AccountTarget, now time.Time) bool {
+// dueAccountTarget follows one-answer-per-round semantics:
+//
+//	healthy: hourly; incorrect answers: every 2 minutes until 3 failures;
+//	quarantined: every 4 hours; first correct recovery: retry in 2 minutes.
+//
+// Failed HTTP/quotas are neutral and retry hourly when not quarantined.
+func dueAccountTarget(t *AccountTarget, quarantined bool, now time.Time) bool {
 	if !t.Enabled {
 		return false
 	}
@@ -35,51 +42,96 @@ func dueAccountTarget(t *AccountTarget, now time.Time) bool {
 		return true
 	}
 	interval := accountNormalInterval
-	if t.ConsecutivePasses == 1 {
+	switch {
+	case quarantined && t.State == "passed" && t.ConsecutivePasses == 1:
 		interval = accountSuspectInterval
-	}
-	switch t.State {
-	case "suspect", "checking":
-		interval = accountSuspectInterval
-	case "unavailable", "manual":
+	case quarantined:
+		interval = accountQuarantinedInterval
+	case t.State == "unavailable" || t.State == "manual":
 		interval = accountRetryInterval
+	case t.State == "suspect" && t.ConsecutiveFails > 0:
+		interval = accountSuspectInterval
 	}
-	// Already quarantined accounts must be periodically rechecked even
-	// if their last failure was many hours ago.
 	return now.Sub(t.CheckedAt) >= interval
+}
+
+// quarantinedAccount resolves the persistent Magpie stable ID. The account
+// target can contain either a stable ID or a user-visible account name.
+func quarantinedAccount(account string, quarantined map[string]bool, known []CodexAccount) bool {
+	if quarantined[account] {
+		return true
+	}
+	id, err := ResolveAccountID(known, account)
+	return err == nil && quarantined[id]
 }
 
 // ScheduleOneAccount runs at most one fresh probe. It never starts a
 // second probe while one is active, and tests the oldest due account first.
 func (s *Service) ScheduleOneAccount(now time.Time) error {
 	s.mu.Lock()
-	if !s.state.Route.ScheduleEnabled {
+	if !s.state.Route.ScheduleEnabled || s.accountProbeActive || len(s.running) > 0 {
 		s.mu.Unlock()
 		return nil
 	}
-	if s.accountProbeActive || len(s.running) > 0 {
-		s.mu.Unlock()
-		return nil
+	targets := make([]AccountTarget, 0, len(s.state.AccountTargets))
+	for _, target := range s.state.AccountTargets {
+		targets = append(targets, *target)
+	}
+	quarantined := make(map[string]bool, len(s.state.Route.Quarantined))
+	for id, active := range s.state.Route.Quarantined {
+		if active {
+			quarantined[id] = true
+		}
+	}
+	s.mu.Unlock()
+	var known []CodexAccount
+	if len(quarantined) > 0 {
+		// Only load identity metadata when isolation is actually in effect.
+		// If discovery fails, do not schedule an account at an incorrect rate.
+		dir, err := MagpieDir()
+		if err != nil {
+			return err
+		}
+		known, err = DiscoverCodexAccounts(dir)
+		if err != nil {
+			return err
+		}
 	}
 	type pending struct {
 		account, model string
 		checked        time.Time
+		priority       int
 	}
 	list := []pending{}
-	for _, t := range s.state.AccountTargets {
-		if dueAccountTarget(t, now) {
-			list = append(list, pending{account: t.Account, model: t.Model, checked: t.CheckedAt})
+	for _, target := range targets {
+		isolated := quarantinedAccount(target.Account, quarantined, known)
+		if dueAccountTarget(&target, isolated, now) {
+			priority := 1
+			// An already due two-minute confirmation must not be starved
+			// by a large backlog of ordinary hourly checks.
+			if (isolated && target.State == "passed" && target.ConsecutivePasses == 1) ||
+				(!isolated && target.State == "suspect" && target.ConsecutiveFails > 0) {
+				priority = 0
+			}
+			list = append(list, pending{account: target.Account, model: target.Model, checked: target.CheckedAt, priority: priority})
 		}
 	}
-	s.mu.Unlock()
 	if len(list) == 0 {
 		return nil
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].checked.Before(list[j].checked) })
-	if err := s.TriggerAccount(list[0].account, list[0].model, "milk"); err != nil {
-		return err
-	}
-	return nil
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].priority != list[j].priority {
+			return list[i].priority < list[j].priority
+		}
+		if list[i].checked.Equal(list[j].checked) {
+			if list[i].account == list[j].account {
+				return list[i].model < list[j].model
+			}
+			return list[i].account < list[j].account
+		}
+		return list[i].checked.Before(list[j].checked)
+	})
+	return s.TriggerAccount(list[0].account, list[0].model, "milk")
 }
 
 // StartAccountScheduler is called by the owned Go service, NOT by New,

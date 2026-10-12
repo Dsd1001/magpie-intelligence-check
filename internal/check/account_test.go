@@ -77,7 +77,7 @@ func TestAccountProbesPersistAndAreIndependent(t *testing.T) {
 	state, _ := s.Snapshot()
 	a := state.AccountTargets[accountTargetID("acct-a", "codex/gpt-6.1-sol")]
 	b := state.AccountTargets[accountTargetID("acct-b", "codex/gpt-6.1-sol")]
-	if a.State != "passed" || b.State != "suspect" || len(state.AccountResults) != 3 {
+	if a.State != "passed" || b.State != "suspect" || len(state.AccountResults) != 2 {
 		t.Fatalf("account result mismatch: a=%+v b=%+v results=%d", a, b, len(state.AccountResults))
 	}
 	if state.Config.GatewayKey != "" || state.Alias != "" {

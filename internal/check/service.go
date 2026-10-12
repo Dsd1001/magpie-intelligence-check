@@ -171,7 +171,10 @@ func New(dir, gate string) (*Service, error) {
 	}
 	s := &Service{dir: dir, gate: gate, store: store, running: map[string]bool{}}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.state = State{Config: Config{DailyLimit: 120}, Targets: map[string]*Target{}, Results: []Result{}, Alias: Secret()}
+	// Six Codex accounts checked hourly use 144 calls/day before any
+	// anomaly retries. New installations default to a bounded 240/day,
+	// while user-configured limits are preserved by the state store.
+	s.state = State{Config: Config{DailyLimit: 240}, Targets: map[string]*Target{}, Results: []Result{}, Alias: Secret()}
 	if err := store.Load(&s.state); err != nil {
 		store.Close()
 		return nil, err
