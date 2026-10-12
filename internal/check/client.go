@@ -77,7 +77,21 @@ func Call(ctx context.Context, c Config, model, prompt string) (string, int, err
 	return call(ctx, c, model, prompt, nil)
 }
 
+// CallAccount sends a probe to one explicit Magpie subscription account.
+// Magpie's X-Magpie-Account pin rejects an unavailable account instead of
+// failing over, so the returned quality grade belongs to that account.
+func CallAccount(ctx context.Context, c Config, model, account, prompt string) (string, int, error) {
+	if err := ValidateAccount(account); err != nil {
+		return "", 0, err
+	}
+	return callWithAccount(ctx, c, model, account, prompt, nil)
+}
+
 func call(ctx context.Context, c Config, model, prompt string, progress func(string)) (string, int, error) {
+	return callWithAccount(ctx, c, model, "", prompt, progress)
+}
+
+func callWithAccount(ctx context.Context, c Config, model, account, prompt string, progress func(string)) (string, int, error) {
 	payload := map[string]any{"model": model, "stream": progress != nil, "max_tokens": 8192, "messages": []any{map[string]string{"role": "user", "content": prompt}}}
 	if progress != nil {
 		payload["stream_options"] = map[string]bool{"include_usage": true}
@@ -93,6 +107,9 @@ func call(ctx context.Context, c Config, model, prompt string, progress func(str
 	}
 	req.Header.Set("Authorization", "Bearer "+c.GatewayKey)
 	req.Header.Set("Content-Type", "application/json")
+	if account != "" {
+		req.Header.Set("X-Magpie-Account", account)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, err

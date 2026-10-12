@@ -18,7 +18,7 @@ function start(options = {}) {
     const bundled = path.join(root, 'bin', `quality-check-${platform}-${arch}${suffix}`);
     const fallback = path.join(root, 'bin', `quality-check${suffix}`);
     const binary = options.binaryPath || (requireFile(bundled) ? bundled : fallback);
-    const args=['-data', options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check'), '-gate', path.join(root, 'plugin', 'gate.middleware.js'),'-owned'];
+    const args=['-data', options.dataDir || path.join(os.homedir(), '.config', 'magpie-account-quality-check'), '-gate', path.join(root, 'plugin', 'gate.middleware.js'),'-owned'];
     if(options.cloudflaredPath)args.push('-cloudflared',options.cloudflaredPath);
     child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     child.stdin.on('error',()=>{});
@@ -35,12 +35,12 @@ function requireFile(file) {
   return existsSync(file);
 }
 process.once('exit', () => child?.kill());
-export default { id: 'quality-check', server: async (_input, options = {}) => ({
+export default { id: 'account-quality-check', server: async (_input, options = {}) => ({
   auth: {
-    provider: 'quality-check',
+    provider: 'account-quality-check',
     methods: [false,true].map(remote=>({ type: 'oauth', label: remote?'打开临时远程控制台（Cloudflare）':'打开本机质量检测控制台', async authorize() {
       const v = await start(options);
-      const binary=remote?await resolveCloudflared(options,options.dataDir || path.join(os.homedir(), '.config', 'magpie-quality-check')):undefined;
+      const binary=remote?await resolveCloudflared(options,options.dataDir || path.join(os.homedir(), '.config', 'magpie-account-quality-check')):undefined;
       const r=await fetch(v.origin+'/api/console',{method:'POST',headers:{authorization:'Bearer '+v.control,'content-type':'application/json'},body:JSON.stringify({remote,binary})});
       if(!r.ok)throw Error(await r.text());const {url}=await r.json();
       if(remote){
@@ -63,6 +63,6 @@ export default { id: 'quality-check', server: async (_input, options = {}) => ({
     const service=await ready;
     stopDiscovery ??= startGatewayDiscovery(service, options);
     cfg.provider ??= {};
-    cfg.provider['quality-check'] = { name: 'Intelligence Check', models: {} };
+    cfg.provider['account-quality-check'] = { name: 'Account Intelligence Check', models: {} };
   }
 }) };

@@ -1,3 +1,37 @@
+# Magpie Account Intelligence Check (development fork)
+
+> 这是基于 [mu-zi-lee/magpie-intelligence-check v0.3.0](https://github.com/mu-zi-lee/magpie-intelligence-check) 的独立开发版。保留原作者 MIT 许可证及版权。**当前处于开发阶段，不应替换生产插件。**
+
+## 账号级质量检测：已实现的第一阶段
+
+- 插件包名：`magpie-account-quality-check`，provider ID：`account-quality-check`，数据目录：`~/.config/magpie-account-quality-check`，与原插件相互隔离。
+- 在原管理控制台点击右下角的「账号独立检测（开发版）」进入 `/accounts`，录入 `账号 + 完整模型 ID`，再点击检测。当前仅支持手动录入账号。
+- 检测通过 `X-Magpie-Account` 指定单个账号，使用原质量题目和评分方法，结果存入 SQLite 中独立的 `account_targets` / `account_results` JSON 状态字段（复用原版的单行状态表）。对于失败的推理题会额外复测一次；网络、鉴权及额度错误记为 `unavailable` 而非“降智”。
+- 整个插件同一时刻最多执行 **1 个账号探针**，测试与记录是只读的，不自动调用 Magpie 管理接口。
+- 新增 `GET /api/account-state`、`POST /api/account-target`、`POST /api/account-test` 和 `POST /api/account-target/delete`；它们均沿用原版管理会话认证。
+- 增加了纯函数 `PlanCodexQuarantine`，能够计算「除检测 Key 外所有生产 Key 排除异常账号」后的白名单，并保留各 Key 原有权限；包含空白名单误放行的保护。**目前只计算，尚未应用到路由。**
+- 测试使用管理控制台配置的 Gateway Key。正式接入生产前必须新建独立的检测 Key，并确认它不受生产账号限制。
+
+**尚未完成**：自动识别账号稳定 ID、定时扫描、基于多轮质量证据的隔离阈值、生产 Key 白名单写入与审计/回滚、异常账号恢复验证、控制台上的自动控制开关。
+
+注意：原版的「模型级 15 分钟失效就 403」逻辑仍存在于源代码中，但与新的账号检测独立。后续启用账号隔离时必须停止该模型级门禁，以免所有健康账号因某个模型结果过期而被拒绝。
+
+## 开发与测试
+
+需要 Go 1.26+：
+
+```sh
+go test ./...
+go vet ./...
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o bin/quality-check-linux-amd64 ./cmd/quality-check
+```
+
+这是早期开发分支，不含任何生产配置或账号凭证。**不要在 VPS 上直接编译或运行开发版本。**
+
+---
+
+## 原版 v0.3.0 说明（供参考）
+
 # Magpie Intelligence Check
 
 Magpie 插件，用于对指定的主力模型做质量探针，并在探针未通过或结果过期时拦截后续请求，等待自动检测或人工处理。

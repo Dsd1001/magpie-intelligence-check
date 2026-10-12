@@ -215,6 +215,82 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
+	// Account probes share this console's authentication and session guard.
+	// No endpoint below modifies production routing or login credentials.
+	mux.HandleFunc("GET /api/account-state", func(w http.ResponseWriter, r *http.Request) {
+		snapshot, _ := s.Snapshot()
+		writeJSON(w, map[string]any{
+			"targets":      snapshot.AccountTargets,
+			"results":      snapshot.AccountResults,
+			"configured":   snapshot.Config.GatewayURL != "" && s.gatewayKeyConfigured(),
+			"routing_mode": "observe_only",
+		})
+	})
+	mux.HandleFunc("POST /api/account-target", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Account string `json:"account"`
+			Model   string `json:"model"`
+			Enabled bool   `json:"enabled"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.SetAccountTarget(input.Account, input.Model, input.Enabled); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/account-target/delete", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Account string `json:"account"`
+			Model   string `json:"model"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.DeleteAccountTarget(input.Account, input.Model); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/account-test", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Account string `json:"account"`
+			Model   string `json:"model"`
+			Prompt  string `json:"prompt"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Prompt == "" {
+			input.Prompt = "milk"
+		}
+		if err := s.TriggerAccount(input.Account, input.Model, input.Prompt); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("GET /accounts", func(w http.ResponseWriter, r *http.Request) {
+		b, err := web.ReadFile("web/accounts.html")
+		if err != nil {
+			http.Error(w, "管理页面不可用", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(b)
+	})
+	mux.HandleFunc("GET /account-panel.js", func(w http.ResponseWriter, r *http.Request) {
+		b, err := web.ReadFile("web/account-panel.js")
+		if err != nil {
+			http.Error(w, "管理脚本不可用", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(b)
+	})
 	mux.HandleFunc("POST /api/action", func(w http.ResponseWriter, r *http.Request) {
 		var a struct{ Model, Action, Prompt string }
 		if !decode(w, r, &a) {

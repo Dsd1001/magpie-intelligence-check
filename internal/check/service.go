@@ -94,11 +94,13 @@ func (s *Service) DeleteTarget(model string) error {
 }
 
 type State struct {
-	Config       Config                    `json:"config"`
-	Targets      map[string]*Target        `json:"targets"`
-	Results      []Result                  `json:"results"`
-	Alias        string                    `json:"alias"`
-	ClearedUsage map[string]map[string]int `json:"cleared_usage,omitempty"`
+	Config         Config                    `json:"config"`
+	Targets        map[string]*Target        `json:"targets"`
+	Results        []Result                  `json:"results"`
+	AccountTargets map[string]*AccountTarget `json:"account_targets,omitempty"`
+	AccountResults []AccountResult           `json:"account_results,omitempty"`
+	Alias          string                    `json:"alias"`
+	ClearedUsage   map[string]map[string]int `json:"cleared_usage,omitempty"`
 }
 
 func (s *Service) ClearResults(ids []string) error {
@@ -136,17 +138,18 @@ func (s *Service) ClearResults(ids []string) error {
 }
 
 type Service struct {
-	mu           sync.Mutex
-	state        State
-	dir, gate    string
-	running      map[string]bool
-	testCancels  map[string]context.CancelFunc
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	store        *Store
-	health       string
-	lastActivity time.Time
+	mu                 sync.Mutex
+	state              State
+	dir, gate          string
+	running            map[string]bool
+	testCancels        map[string]context.CancelFunc
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	store              *Store
+	health             string
+	accountProbeActive bool
+	lastActivity       time.Time
 }
 
 func Secret() string {
@@ -170,6 +173,17 @@ func New(dir, gate string) (*Service, error) {
 	if err := store.Load(&s.state); err != nil {
 		store.Close()
 		return nil, err
+	}
+	if s.state.Targets == nil {
+		s.state.Targets = map[string]*Target{}
+	}
+	if s.state.AccountTargets == nil {
+		s.state.AccountTargets = map[string]*AccountTarget{}
+	}
+	for _, t := range s.state.AccountTargets {
+		if t.State == "checking" {
+			t.State, t.Reason = "unavailable", "检测服务重启，请重试"
+		}
 	}
 	for _, t := range s.state.Targets {
 		if t.State == "checking" {

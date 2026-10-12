@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Magpie 账号质量检测</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#0f172a;color:#e2e8f0;font:15px system-ui;margin:auto;padding:22px;max-width:950px}
+  h1{font-size:1.45rem}p{line-height:1.65;color:#cbd5e1}
+  .note{padding:12px;background:#172554;border-radius:8px}
+  fieldset{border:1px solid #475569;border-radius:10px;padding:14px;display:grid;gap:9px}
+  label{font-size:13px;color:#cbd5e1}input{color:#e2e8f0;background:#1e293b;border:1px solid #64748b;border-radius:5px;padding:9px;width:97%;font:inherit}
+  button,.link{font:inherit;color:#e2e8f0;background:#334155;border:1px solid #64748b;border-radius:6px;padding:8px 12px;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  a{color:#93c5fd}table{border-collapse:collapse;width:100%;margin-top:20px}td,th{text-align:left;padding:10px 8px;border-bottom:1px solid #334155}
+  #notice{min-height:24px;color:#fbbf24}small{color:#94a3b8}
+  .actions{display:flex;gap:6px;flex-wrap:wrap}.pass{color:#86efac}.failed{color:#fda4af}
+  @media(max-width:650px){body{padding:12px}table{display:block;overflow-x:auto}td,th{white-space:nowrap}}
+</style>
+</head>
+<body>
+<a href="/">← 返回质量控制台</a>
+<h1>账号独立质量检测 <small>开发预览</small></h1>
+<p class="note">本页面目前只检测、记录状态，<strong>不会自动停用账号或修改 Gateway Key 路由</strong>。质量测试使用原控制台设置的 Gateway Key；正式部署前请换成独立检测 Key。</p>
+<form id="add">
+ <fieldset>
+  <legend>新增检测目标</legend>
+  <label>Magpie 账号（与 Magpie Providers 页面一致）<input required maxlength="256" name="account" placeholder="account@example.com" autocomplete="off"></label>
+  <label>完整模型 ID<input required name="model" placeholder="codex/gpt-6.1-sol" autocomplete="off"></label>
+  <div><button type="submit">添加账号 × 模型</button> <button type="button" id="refresh">刷新</button></div>
+ </fieldset>
+</form>
+<p id="notice" role="status"></p>
+<table aria-label="分账号质量状态">
+  <thead><tr><th>账号</th><th>模型</th><th>检测状态</th><th>最近检查</th><th>操作</th></tr></thead>
+  <tbody id="targets"><tr><td colspan="5">正在加载...</td></tr></tbody>
+</table>
+<h2>最近探针结果</h2>
+<table aria-label="检测历史">
+ <thead><tr><th>时间</th><th>账号 / 模型</th><th>结论</th><th>消耗</th></tr></thead>
+ <tbody id="results"></tbody>
+</table>
+<script type="module" src="/account-panel.js"></script>
+</body>
+</html>

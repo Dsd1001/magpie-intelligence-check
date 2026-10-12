@@ -1,4 +1,4 @@
-module github.com/mu-zi-lee/magpie-intelligence-check
+module github.com/Dsd1001/magpie-intelligence-check
 
 go 1.26.0
 

@@ -1,6 +1,6 @@
 {
-  "name": "magpie-intelligence-check",
-  "version": "0.3.0",
+  "name": "magpie-account-quality-check",
+  "version": "0.3.0-account.1",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [
