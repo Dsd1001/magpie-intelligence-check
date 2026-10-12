@@ -181,9 +181,10 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 	defer s.wg.Done()
 	ctx, cancel := context.WithTimeout(parent, 180*time.Second)
 	defer cancel()
-	// One answer per round: an incorrect answer schedules the next round
-	// two minutes later. No immediate repeat is permitted here.
-	answer, tokens, err := callWithAccount(ctx, cfg, "quality-probe/"+alias+"/"+model, account, p.Text, nil)
+	// Resolve the current account login name for every probe, not its
+	// stable allowlist ID, and never permit a routing fallback.
+	// One answer per round, with no immediate retry.
+	answer, tokens, err := CallAccount(ctx, cfg, "quality-probe/"+alias+"/"+model, account, p.Text)
 	record := AccountResult{
 		ID: Secret()[:12], Account: account, Model: model, Prompt: p.ID,
 		Time: time.Now(), Tokens: tokens, Answer: answer,

@@ -141,6 +141,7 @@ func TestFullAccountThreeFailuresAndTwoPassesWithQuarantineCadence(t *testing.T)
 func ptrAccountTarget(target AccountTarget) *AccountTarget { return &target }
 
 func TestAccountOneCorrectAnswerResetsTwoFailures(t *testing.T) {
+	useProbeAccountDirectory(t, map[string]string{"C": "C"})
 	// Verifies "consecutive" means uninterrupted incorrect answers.
 	s := fixture(t)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

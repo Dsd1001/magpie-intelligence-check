@@ -83,6 +83,7 @@ func TestAccountSchedulerDefaultIsOff(t *testing.T) {
 }
 
 func TestScheduledProbeOneAnswerPerRound(t *testing.T) {
+	useProbeAccountDirectory(t, map[string]string{"account-c": "account-c"})
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -149,6 +150,7 @@ func waitAccountIdle(t *testing.T, s *Service) {
 // A rapid 2-minute confirmation takes precedence over unrelated overdue
 // hourly checks, while the same global one-probe-at-a-time guard is respected.
 func TestSuspectTwoMinuteProbePrioritizedOverNormalHourlyBacklog(t *testing.T) {
+	useProbeAccountDirectory(t, map[string]string{"normal": "normal", "suspect": "suspect"})
 	var selected atomic.Value
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		selected.Store(r.Header.Get("X-Magpie-Account"))

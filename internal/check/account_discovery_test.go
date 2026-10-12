@@ -50,3 +50,24 @@ func TestDiscoverMatchesMagpieLegacyID(t *testing.T) {
 		t.Fatal(a, err)
 	}
 }
+
+// useProbeAccountDirectory gives the standalone HTTP client a realistic
+// Magpie login lookup instead of pretending stable IDs are header pins.
+func useProbeAccountDirectory(t *testing.T, entries map[string]string) {
+	t.Helper()
+	type login struct {
+		ID    string `json:"id"`
+		User  string `json:"user"`
+		Agent string `json:"agent"`
+	}
+	rows := make([]login, 0, len(entries))
+	for id, user := range entries {
+		rows = append(rows, login{ID: id, User: user, Agent: "codex"})
+	}
+	body, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := writeCodexFixture(t, string(body))
+	t.Setenv("MAGPIE_ACCOUNT_QUALITY_MAGPIE_DIR", dir)
+}

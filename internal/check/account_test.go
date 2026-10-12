@@ -13,6 +13,7 @@ import (
 )
 
 func TestPinnedProbeDoesNotFallback(t *testing.T) {
+	useProbeAccountDirectory(t, map[string]string{"stable-c": "acct-c@example.com"})
 	calls := 0
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -40,6 +41,7 @@ func TestPinnedProbeDoesNotFallback(t *testing.T) {
 }
 
 func TestAccountProbesPersistAndAreIndependent(t *testing.T) {
+	useProbeAccountDirectory(t, map[string]string{"acct-a": "acct-a", "acct-b": "acct-b"})
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Header.Get("X-Magpie-Account") == "acct-b" {

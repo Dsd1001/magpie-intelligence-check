@@ -105,3 +105,29 @@ func ResolveAccountID(accounts []CodexAccount, ref string) (string, error) {
 	}
 	return "", fmt.Errorf("无法在 Magpie 已保存账号中找到 %q", ref)
 }
+
+// ResolveProbeLoginUser converts a stable Magpie account ID to the
+// account's CURRENT login name for X-Magpie-Account.
+//
+// Magpie v0.1.1207 accepts the account login name or a routing trace ID
+// in that HTTP header; the stable IDs in caller-keys.json are a separate
+// namespace and are NOT valid account pins. Do not pass the ID through.
+func ResolveProbeLoginUser(ref string) (string, error) {
+	if err := ValidateAccount(ref); err != nil {
+		return "", err
+	}
+	dir, err := MagpieDir()
+	if err != nil {
+		return "", err
+	}
+	accounts, err := DiscoverCodexAccounts(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range accounts {
+		if strings.EqualFold(ref, a.ID) || strings.EqualFold(ref, a.User) {
+			return a.User, nil
+		}
+	}
+	return "", fmt.Errorf("无法找到检测账号 %q 的当前登录名，已取消本轮请求以避免检测其他账号", ref)
+}

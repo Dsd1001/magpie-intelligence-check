@@ -81,10 +81,14 @@ func Call(ctx context.Context, c Config, model, prompt string) (string, int, err
 // Magpie's X-Magpie-Account pin rejects an unavailable account instead of
 // failing over, so the returned quality grade belongs to that account.
 func CallAccount(ctx context.Context, c Config, model, account, prompt string) (string, int, error) {
-	if err := ValidateAccount(account); err != nil {
+	// Magpie Gateway Key white lists store stable login IDs, but the
+	// X-Magpie-Account header only accepts the account's current login
+	// name (or routing trace ID). This lookup must fail closed.
+	pinUser, err := ResolveProbeLoginUser(account)
+	if err != nil {
 		return "", 0, err
 	}
-	return callWithAccount(ctx, c, model, account, prompt, nil)
+	return callWithAccount(ctx, c, model, pinUser, prompt, nil)
 }
 
 func call(ctx context.Context, c Config, model, prompt string, progress func(string)) (string, int, error) {
