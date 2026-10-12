@@ -61,3 +61,94 @@ $('#add').onsubmit=async event=>{
 $('#refresh').onclick=refresh;
 refresh();
 setInterval(refresh,10000);
+
+// The native Magpie account ID, not a stored OAuth token, selects an account.
+async function loadAccountSuggestions(){
+  try {
+    const data=await request('/api/codex-accounts');
+    const list=$('#knownAccounts');
+    list.replaceChildren();
+    for(const a of (data.accounts||[])){
+      const item=document.createElement('option');
+      item.value=a.user;
+      item.label=a.id;
+      list.append(item);
+    }
+  }catch(e){notice.textContent='账号发现不可用：'+e.message;}
+}
+async function loadRoutingSettings(){
+  try{
+    const data=await request('/api/routing/settings');
+    const route=data.route||{};
+    const form=$('#routingForm');
+    form.elements.probe_key_id.value=route.probe_key_id||'';
+    form.elements.expected_codex_count.value=route.expected_codex_count||'';
+    form.elements.auto_apply.checked=Boolean(route.auto_apply);
+    form.elements.schedule_enabled.checked=Boolean(route.schedule_enabled);
+    $('#routingStatus').textContent=route.pending?'存在待核对的未完成路由操作':(route.last_error||'路由控制器：'+(route.auto_apply?'已授权自动同步':'只观察'));
+  }catch(e){$('#routingStatus').textContent=e.message;}
+}
+async function previewRouting(){
+  const preview=$('#routingPreview');
+  try{
+    const result=await request('/api/routing/preview');
+    const rows=[
+      '模式：'+(result.mode==='active'?'已启用自动隔离':'只观察'),
+      '已发现 Codex 账号：'+result.account_count,
+      '隔离 ID：'+((result.quarantined||[]).join(', ')||'无'),
+      '将改变的生产 Key：'+(result.keys||[]).filter(k=>k.changed).length,
+    ];
+    for (const key of result.keys||[]) {
+      rows.push((key.is_probe?'检测 Key ':'生产 Key ')+key.key_id+': '+
+        (key.is_probe?'始终不变':key.changed?'需要同步':'无需更改')+
+        '；原权限 ['+(key.before||[]).join(', ')+'] → 目标 ['+(key.after||[]).join(', ')+']');
+    }
+    preview.textContent=rows.join('\n');
+  }catch(e){preview.textContent='安全检查未通过：'+e.message;}
+}
+$('#routingForm').onsubmit=async (event)=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  try{
+    await request('/api/routing/config',{
+      probe_key_id:form.elements.probe_key_id.value.trim(),
+      expected_codex_count:Number(form.elements.expected_codex_count.value||0),
+      schedule_enabled:form.elements.schedule_enabled.checked,
+      auto_apply:form.elements.auto_apply.checked,
+      confirm:form.elements.confirm.value.trim()
+    });
+    form.elements.confirm.value='';
+    $('#routingStatus').textContent='保存成功。启用后在下一轮调度或手动同步时才会写入白名单。';
+    await loadRoutingSettings(); await previewRouting();
+  }catch(e){$('#routingStatus').textContent=e.message;}
+};
+$('#previewRoutes').onclick=previewRouting;
+for(const [id,path,confirm] of [
+  ['applyRoutes','/api/routing/apply','APPLY_QUARANTINE'],
+  ['restoreRoutes','/api/routing/restore','RESTORE_ALL_PRODUCTION_KEYS'],
+  ['recoverRoutes','/api/routing/recover','RECOVER_PENDING_JOURNAL']
+]){
+  $('#'+id).onclick=async()=>{
+    if($('#routingActionConfirm').value.trim()!==confirm){
+      $('#routingStatus').textContent='请输入正确的操作确认短语：'+confirm;return;
+    }
+    try{
+      await request(path,{confirm});
+      $('#routingActionConfirm').value='';
+      $('#routingStatus').textContent='操作成功，已记录审计日志。';
+      await loadRoutingSettings();await previewRouting();
+    }catch(e){$('#routingStatus').textContent=e.message;}
+  };
+}
+loadAccountSuggestions();
+loadRoutingSettings();
+
+$('#discoverAll').onclick=async()=>{
+  const model=document.querySelector('#add').elements.model.value.trim();
+  if (!model) {notice.textContent='请先输入完整模型 ID';return;}
+  try {
+    const r=await request('/api/account-targets/discover',{model,confirm:'ADD_ALL_CODEX_ACCOUNTS'});
+    notice.textContent='已匹配 '+r.count+' 个 Magpie Codex 账号，现可逐一检测。';
+    await refresh();
+  }catch(e){notice.textContent=e.message;}
+};

@@ -20,6 +20,15 @@ func fixture(t *testing.T) *Service {
 		t.Fatal(e)
 	}
 	t.Cleanup(s.Close)
+	// The upstream legacy regression fixtures explicitly retain the
+	// original model-wide gate. Fresh fork installs default to bypass.
+	s.mu.Lock()
+	s.state.Config.LegacyGate = true
+	if err := s.saveLocked(); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
 	return s
 }
 func TestGateAndPersistence(t *testing.T) {

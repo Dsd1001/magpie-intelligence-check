@@ -20,7 +20,11 @@ function start(options = {}) {
     const binary = options.binaryPath || (requireFile(bundled) ? bundled : fallback);
     const args=['-data', options.dataDir || path.join(os.homedir(), '.config', 'magpie-account-quality-check'), '-gate', path.join(root, 'plugin', 'gate.middleware.js'),'-owned'];
     if(options.cloudflaredPath)args.push('-cloudflared',options.cloudflaredPath);
-    child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // The helper only reads Magpie metadata from this directory. An
+    // explicitly configured portable Magpie uses a separate config root.
+    const env = { ...process.env };
+    if (options.magpieConfigDir) env.MAGPIE_ACCOUNT_QUALITY_MAGPIE_DIR = options.magpieConfigDir;
+    child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env });
     child.stdin.on('error',()=>{});
     let output = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('质量检测后台启动超时')); }, 15000);

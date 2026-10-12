@@ -2,31 +2,43 @@
 
 > 这是基于 [mu-zi-lee/magpie-intelligence-check v0.3.0](https://github.com/mu-zi-lee/magpie-intelligence-check) 的独立开发版。保留原作者 MIT 许可证及版权。**当前处于开发阶段，不应替换生产插件。**
 
-## 账号级质量检测：已实现的第一阶段
+## 增强版：账号级质量监测与路由隔离
 
-- 插件包名：`magpie-account-quality-check`，provider ID：`account-quality-check`，数据目录：`~/.config/magpie-account-quality-check`，与原插件相互隔离。
-- 在原管理控制台点击右下角的「账号独立检测（开发版）」进入 `/accounts`，录入 `账号 + 完整模型 ID`，再点击检测。当前仅支持手动录入账号。
-- 检测通过 `X-Magpie-Account` 指定单个账号，使用原质量题目和评分方法，结果存入 SQLite 中独立的 `account_targets` / `account_results` JSON 状态字段（复用原版的单行状态表）。对于失败的推理题会额外复测一次；网络、鉴权及额度错误记为 `unavailable` 而非“降智”。
-- 整个插件同一时刻最多执行 **1 个账号探针**，测试与记录是只读的，不自动调用 Magpie 管理接口。
-- 新增 `GET /api/account-state`、`POST /api/account-target`、`POST /api/account-test` 和 `POST /api/account-target/delete`；它们均沿用原版管理会话认证。
-- 增加了纯函数 `PlanCodexQuarantine`，能够计算「除检测 Key 外所有生产 Key 排除异常账号」后的白名单，并保留各 Key 原有权限；包含空白名单误放行的保护。**目前只计算，尚未应用到路由。**
-- 测试使用管理控制台配置的 Gateway Key。正式接入生产前必须新建独立的检测 Key，并确认它不受生产账号限制。
+> 基于原版 v0.3.0，面向 Magpie v0.1.1207 开发。新包使用独立的 `account-quality-check` Provider ID 和 `~/.config/magpie-account-quality-check` 数据目录。**默认不会改变任何生产路由**。
 
-**尚未完成**：自动识别账号稳定 ID、定时扫描、基于多轮质量证据的隔离阈值、生产 Key 白名单写入与审计/回滚、异常账号恢复验证、控制台上的自动控制开关。
+### 功能
 
-注意：原版的「模型级 15 分钟失效就 403」逻辑仍存在于源代码中，但与新的账号检测独立。后续启用账号隔离时必须停止该模型级门禁，以免所有健康账号因某个模型结果过期而被拒绝。
+- 本机只读解析 Magpie `logins.json` 的账号名称和 **稳定 ID**，不加载/返回 OAuth 凭据；网页可以选择单个账号，也可以为某个模型批量添加全部 Codex 账号。
+- 使用 `X-Magpie-Account` 绑定单个订阅账号；使用独立检测 Gateway Key。请求失败（额度、429、登录失效）记为「不可用」，不能作为降智证据。
+- 每轮「牛奶推理」失败再独立复测一次；同一账号+模型连续 **3 轮**失败才进入待隔离集合，连续 **2 轮**通过后才可恢复。判定仅代表该题表现异常，**不等于证实官方限制了模型智力**。
+- 可选定时探针：正常每 4 小时、疑似异常每 30 分钟、不可用每 1 小时；整个插件同时最多 **1 个**账号探针，轮询调度每 60 秒执行一次。
+- 可选自动路由隔离：监控所有生产 Gateway Key（包括以后新建的 Key），**排除配置为检测 Key 的那一个**。每个生产 Key 的原有白名单单独保存，恢复时原样还原；不删除、不停用 Codex 登录账号。
+- 自动路由默认为关闭，开启时必须指定独立检测 Key、确认它与当前网关 Key 的密钥一致、输入 `ENABLE_ALL_PRODUCTION_KEYS`，并填写预期 Codex 账号总数以防漏识别。
+- 更新 `caller-keys.json` 使用 Magpie 原生的跨进程 `caller-keys.json.lock` 文件锁及原子替换；遇到人工改动、账号数量不符、密钥不符、账号全部不健康等情况拒绝写入。采用持久化写前日志，审计最近操作，并提供确认式的「恢复原路由」与「检查未完成事务」。
+- **新版默认不启用原版模型级 15 分钟到期 403 门禁**：生产流量由 Magpie 原生账号白名单控制，不再把单账号质量问题扩大成整个模型不可用。
+- Web 管理控制台 `/accounts`，提供账号检测历史、名单预览、开关、手动同步、原权限恢复及待确认事务恢复。
 
-## 开发与测试
+### 使用前提与重要限制
 
-需要 Go 1.26+：
+1. 在 Magpie Gateway → Gateway Keys 创建 **独立检测 Key**（与 sub2api 等生产 Key 不同），在插件的原版设置弹窗填入它的明文密钥；在新页面填该 Key 的 **ID**，并确认当前发现的账号数量与 Magpie 实际列表一致。
+2. **首次上线先只观察**：批量添加要检测的账号/模型，开启低频调度并运行单账号检查。确定 Header 绑定正确、监测结果可信后，再启用自动路由。
+3. 同一个 Magpie 上所有通过 Gateway Key 的生产客户端均受控；不通过 Gateway Key 的本机调用不属于该白名单作用范围。
+4. 如果某个生产 Key 原本只允许已经被隔离的 Codex 账号，程序会**拒绝自动更新所有 Key**，避免写入 Magpie 意义上的空白名单（空代表「允许全部」）。请管理员先处理这个 Key 的权限，再重新同步。
+5. 当前账号目录来自 Magpie 同用户配置目录中的 `logins.json`。某些纯外部凭据可能未被包含；**预期账号数核对不通过就拒绝启用**。便携版/自定义目录请通过插件选项 `magpieConfigDir` 显式指定配置目录（或设置 `MAGPIE_ACCOUNT_QUALITY_MAGPIE_DIR`）。
+6. 自动 Key 变更当前是每 60 秒轮询；刚创建的新生产 Key 在下一轮检查前可能短暂使用隔离账号。要求零窗口隔离时，需要 Magpie 核心提供专门的全局账号隔离接口。
+7. 即使某账号只在一题上连续失败，也存在误判风险。建议在测试环境完成多种提示词评估，并保留应急恢复操作，再启用生产自动隔离。
+8. 安装增强版时**必须先停用原版 v0.3.0 的中间件**，避免两套门禁重叠造成 403。原版数据库保留备份即可。新插件的初始安装不会自动接管生产 Key。
+
+### 开发测试
 
 ```sh
 go test ./...
+go test -race ./internal/check
 go vet ./...
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o bin/quality-check-linux-amd64 ./cmd/quality-check
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/quality-check-linux-amd64 ./cmd/quality-check
 ```
 
-这是早期开发分支，不含任何生产配置或账号凭证。**不要在 VPS 上直接编译或运行开发版本。**
+这是开发分支，测试只覆盖离线模拟配置；实际 Magpie 账号识别、插件安装及路由变更还需专门的预发布验证。**目前未部署 VPS 生产环境。**
 
 ---
 

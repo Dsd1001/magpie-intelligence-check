@@ -219,11 +219,15 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 	// No endpoint below modifies production routing or login credentials.
 	mux.HandleFunc("GET /api/account-state", func(w http.ResponseWriter, r *http.Request) {
 		snapshot, _ := s.Snapshot()
+		mode := "observe_only"
+		if snapshot.Route.AutoApply {
+			mode = "active"
+		}
 		writeJSON(w, map[string]any{
 			"targets":      snapshot.AccountTargets,
 			"results":      snapshot.AccountResults,
 			"configured":   snapshot.Config.GatewayURL != "" && s.gatewayKeyConfigured(),
-			"routing_mode": "observe_only",
+			"routing_mode": mode,
 		})
 	})
 	mux.HandleFunc("POST /api/account-target", func(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +276,149 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			return
 		}
 		writeJSON(w, map[string]bool{"ok": true})
+	})
+	// Account discovery exposes only IDs and display names, never the
+	// credentials inside Magpie's local logins.json.
+	mux.HandleFunc("POST /api/account-targets/discover", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Model   string `json:"model"`
+			Confirm string `json:"confirm"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Confirm != "ADD_ALL_CODEX_ACCOUNTS" {
+			http.Error(w, "需要确认 ADD_ALL_CODEX_ACCOUNTS", 400)
+			return
+		}
+		count, err := s.DiscoverAccountTargets(input.Model)
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "count": count})
+	})
+	mux.HandleFunc("GET /api/codex-accounts", func(w http.ResponseWriter, r *http.Request) {
+		dir, err := MagpieDir()
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		accounts, err := DiscoverCodexAccounts(dir)
+		if err != nil {
+			http.Error(w, err.Error(), 503)
+			return
+		}
+		writeJSON(w, map[string]any{"accounts": accounts})
+	})
+	mux.HandleFunc("GET /api/routing/settings", func(w http.ResponseWriter, r *http.Request) {
+		state, _ := s.Snapshot()
+		writeJSON(w, map[string]any{"route": state.Route})
+	})
+	mux.HandleFunc("GET /api/routing/preview", func(w http.ResponseWriter, r *http.Request) {
+		preview, err := s.RoutingPreview()
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, preview)
+	})
+	mux.HandleFunc("POST /api/routing/config", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ProbeKeyID         string `json:"probe_key_id"`
+			AutoApply          bool   `json:"auto_apply"`
+			ScheduleEnabled    bool   `json:"schedule_enabled"`
+			ExpectedCodexCount int    `json:"expected_codex_count"`
+			Confirm            string `json:"confirm"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.AutoApply && input.ExpectedCodexCount < 2 {
+			http.Error(w, "自动隔离必须填写完整的 Codex 账号数量（至少 2 个）", 400)
+			return
+		}
+		if input.AutoApply && input.Confirm != "ENABLE_ALL_PRODUCTION_KEYS" {
+			http.Error(w, "开启自动隔离需要输入完整确认短语 ENABLE_ALL_PRODUCTION_KEYS", 400)
+			return
+		}
+		if err := s.ConfigureRouting(input.ProbeKeyID, false, ""); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if err := s.ConfigureExpectedAccountCount(input.ExpectedCodexCount); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if input.AutoApply {
+			if _, err := s.RoutingPreview(); err != nil {
+				http.Error(w, err.Error(), 409)
+				return
+			}
+			if err := s.ConfigureRouting(input.ProbeKeyID, true, input.Confirm); err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+		}
+		if err := s.AccountScheduleEnabled(input.ScheduleEnabled); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("POST /api/routing/apply", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Confirm string `json:"confirm"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Confirm != "APPLY_QUARANTINE" {
+			http.Error(w, "需要确认 APPLY_QUARANTINE", 400)
+			return
+		}
+		preview, err := s.ApplyRouting(r.Context(), false)
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, preview)
+	})
+	mux.HandleFunc("POST /api/routing/restore", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Confirm string `json:"confirm"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Confirm != "RESTORE_ALL_PRODUCTION_KEYS" {
+			http.Error(w, "需要确认 RESTORE_ALL_PRODUCTION_KEYS", 400)
+			return
+		}
+		preview, err := s.ApplyRouting(r.Context(), true)
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, preview)
+	})
+	mux.HandleFunc("POST /api/routing/recover", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Confirm string `json:"confirm"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Confirm != "RECOVER_PENDING_JOURNAL" {
+			http.Error(w, "需要确认 RECOVER_PENDING_JOURNAL", 400)
+			return
+		}
+		status, err := s.RecoverRoutingJournal(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, map[string]string{"status": status})
 	})
 	mux.HandleFunc("GET /accounts", func(w http.ResponseWriter, r *http.Request) {
 		b, err := web.ReadFile("web/accounts.html")

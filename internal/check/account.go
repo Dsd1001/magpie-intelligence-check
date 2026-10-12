@@ -141,8 +141,8 @@ func (s *Service) TriggerAccount(account, model, prompt string) error {
 	if target == nil || !target.Enabled {
 		return errors.New("该账号及模型尚未启用监测")
 	}
-	if s.accountProbeActive {
-		return errors.New("已有账号检测正在执行；每次只允许一个探针")
+	if s.accountProbeActive || len(s.running) > 0 {
+		return errors.New("已有检测正在执行；每次只允许一个探针")
 	}
 	cfg := s.state.Config
 	if cfg.GatewayURL == "" || cfg.GatewayKey == "" {
@@ -192,8 +192,8 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 			ID: Secret()[:12], Account: account, Model: model, Prompt: p.ID,
 			Time: time.Now(), Tokens: tokens, Answer: answer,
 		}
-		if len(record.Answer) > 16*1024 {
-			record.Answer = record.Answer[:16*1024]
+		if len(record.Answer) > 8*1024 {
+			record.Answer = record.Answer[:8*1024]
 		}
 		if err != nil {
 			record.Verdict, record.Error = "unavailable", err.Error()
@@ -204,8 +204,8 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 		}
 		s.mu.Lock()
 		s.state.AccountResults = append(s.state.AccountResults, record)
-		if len(s.state.AccountResults) > 1000 {
-			s.state.AccountResults = append([]AccountResult{}, s.state.AccountResults[len(s.state.AccountResults)-1000:]...)
+		if len(s.state.AccountResults) > 300 {
+			s.state.AccountResults = append([]AccountResult{}, s.state.AccountResults[len(s.state.AccountResults)-300:]...)
 		}
 		_ = s.store.Save(s.state)
 		s.mu.Unlock()
@@ -239,4 +239,41 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 		// Do not change quality counters on 429, network errors or timeouts.
 	}
 	_ = s.saveLocked()
+}
+
+// DiscoverAccountTargets enrolls every Codex account that Magpie stored.
+// Existing results are kept. One SQLite write updates the entire set.
+func (s *Service) DiscoverAccountTargets(model string) (int, error) {
+	if err := validateAccountModel(model); err != nil {
+		return 0, err
+	}
+	dir, err := MagpieDir()
+	if err != nil {
+		return 0, err
+	}
+	accounts, err := DiscoverCodexAccounts(dir)
+	if err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.accountProbeActive {
+		return 0, errors.New("检测进行中，暂不能批量修改目标")
+	}
+	before := make(map[string]*AccountTarget, len(s.state.AccountTargets))
+	for k, v := range s.state.AccountTargets {
+		c := *v
+		before[k] = &c
+	}
+	for _, acct := range accounts {
+		id := accountTargetID(acct.ID, model)
+		if _, ok := s.state.AccountTargets[id]; !ok {
+			s.state.AccountTargets[id] = &AccountTarget{Account: acct.ID, Model: model, Enabled: true, State: "unverified"}
+		}
+	}
+	if err := s.saveLocked(); err != nil {
+		s.state.AccountTargets = before
+		return 0, err
+	}
+	return len(accounts), nil
 }
