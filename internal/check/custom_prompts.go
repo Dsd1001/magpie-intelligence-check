@@ -116,18 +116,6 @@ func (s *Service) PromptCatalog() []Prompt {
 	return s.promptCatalogLocked()
 }
 
-func (s *Service) activeAccountPromptsLocked() []Prompt {
-	// Milk is the proven default. New custom auto questions rotate in
-	// on subsequent hourly checks and remain single-call-per-round.
-	out := []Prompt{Prompts[0]}
-	for _, p := range s.state.CustomPrompts {
-		if validAutomaticCustom(p) {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func (s *Service) AddCustomPrompt(name, promptText, guidance string, automatic bool, answers []string) (Prompt, error) {
 	clean, err := validateCustomPrompt(name, promptText, guidance, automatic, answers)
 	if err != nil {
@@ -203,13 +191,16 @@ func (s *Service) UpdateCustomPrompt(id, name, promptText, guidance string, auto
 		}
 		rubricChanged := before.Text != updated.Text || before.Automatic != updated.Automatic ||
 			!slices.Equal(before.ExpectedAnswers, updated.ExpectedAnswers)
+		previousSelection := s.state.AutoPromptPolicy
 		s.state.CustomPrompts[i] = updated
 		var targets map[string]AccountTarget
 		if rubricChanged {
 			targets = s.resetTargetsForPromptLocked(id)
 		}
+		s.reconcileAutoPromptPolicyLocked()
 		if err := s.store.Save(s.state); err != nil {
 			s.state.CustomPrompts[i] = before
+			s.state.AutoPromptPolicy = previousSelection
 			s.restoreTargetsLocked(targets)
 			return err
 		}
@@ -229,10 +220,13 @@ func (s *Service) DeleteCustomPrompt(id string) error {
 			continue
 		}
 		before := append([]Prompt{}, s.state.CustomPrompts...)
+		previousSelection := s.state.AutoPromptPolicy
 		targets := s.resetTargetsForPromptLocked(id)
 		s.state.CustomPrompts = append(s.state.CustomPrompts[:i:i], s.state.CustomPrompts[i+1:]...)
+		s.reconcileAutoPromptPolicyLocked()
 		if err := s.store.Save(s.state); err != nil {
 			s.state.CustomPrompts = before
+			s.state.AutoPromptPolicy = previousSelection
 			s.restoreTargetsLocked(targets)
 			return err
 		}

@@ -278,11 +278,26 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 			mode = "active"
 		}
 		writeJSON(w, map[string]any{
-			"targets":      snapshot.AccountTargets,
-			"results":      snapshot.AccountResults,
-			"configured":   snapshot.Config.GatewayURL != "" && s.gatewayKeyConfigured(),
-			"routing_mode": mode,
+			"targets":            snapshot.AccountTargets,
+			"results":            snapshot.AccountResults,
+			"configured":         snapshot.Config.GatewayURL != "" && s.gatewayKeyConfigured(),
+			"routing_mode":       mode,
+			"auto_prompt_policy": s.AutoPromptSettings(),
 		})
+	})
+	mux.HandleFunc("POST /api/account-auto-prompts", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			PromptIDs []string `json:"prompt_ids"`
+			Rotate    bool     `json:"rotate"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.ConfigureAutoPrompts(input.PromptIDs, input.Rotate); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, s.AutoPromptSettings())
 	})
 	mux.HandleFunc("POST /api/account-target", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {

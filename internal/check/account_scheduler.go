@@ -68,9 +68,9 @@ func quarantinedAccount(account string, quarantined map[string]bool, known []Cod
 // selectAutomaticPrompt rotates configured objective questions while healthy,
 // but sticks to the SAME failed question for two-minute confirmation and
 // while quarantined. No extra calls per hour are introduced.
-func selectAutomaticPrompt(t AccountTarget, isolated bool, prompts []Prompt) string {
+func selectAutomaticPrompt(t AccountTarget, isolated, rotate bool, prompts []Prompt) string {
 	if len(prompts) == 0 {
-		return "milk" // fail-safe default from built-in prompts
+		return "" // never silently probe an unselected or ungraded question
 	}
 	if t.LastAutoPrompt != "" && (t.ConsecutiveFails > 0 || isolated) {
 		for _, p := range prompts {
@@ -78,6 +78,9 @@ func selectAutomaticPrompt(t AccountTarget, isolated bool, prompts []Prompt) str
 				return p.ID
 			}
 		}
+	}
+	if !rotate {
+		return prompts[0].ID
 	}
 	return prompts[int(t.PromptRotation%uint64(len(prompts)))].ID
 }
@@ -95,6 +98,11 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 		targets = append(targets, *target)
 	}
 	automaticPrompts := s.activeAccountPromptsLocked()
+	rotate := s.effectiveAutoPromptPolicyLocked().Rotate
+	if len(automaticPrompts) == 0 {
+		s.mu.Unlock()
+		return errors.New("尚未配置有效的自动检测题库，已停止发起探针")
+	}
 	quarantined := make(map[string]bool, len(s.state.Route.Quarantined))
 	for id, active := range s.state.Route.Quarantined {
 		if active {
@@ -132,7 +140,7 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 				(!isolated && target.State == "suspect" && target.ConsecutiveFails > 0) {
 				priority = 0
 			}
-			prompt := selectAutomaticPrompt(target, isolated, automaticPrompts)
+			prompt := selectAutomaticPrompt(target, isolated, rotate, automaticPrompts)
 			list = append(list, pending{account: target.Account, model: target.Model, prompt: prompt, checked: target.CheckedAt, priority: priority})
 		}
 	}

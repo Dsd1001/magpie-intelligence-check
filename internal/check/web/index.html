@@ -165,6 +165,19 @@
         <button class="icon-button" id="accountRefresh" type="button" aria-label="刷新账号列表" data-tooltip="刷新账号列表" data-icon="RefreshCw"></button>
       </div>
     </form>
+    <section class="auto-bank-settings" aria-label="自动检测题库设置">
+      <div class="section-heading"><h2>自动检测题库</h2><span id="autoBankStatus" class="meta">读取中</span></div>
+      <div class="auto-bank-controls">
+        <div class="auto-bank-picker">
+          <button type="button" id="autoBankDropdown" class="secondary auto-bank-trigger" aria-expanded="false" aria-controls="autoBankOptions">选择自动检测题目 · <span id="autoBankCount">0</span> 项 <i data-icon="ChevronDown"></i></button>
+          <div id="autoBankOptions" class="auto-bank-options" hidden role="group" aria-label="自动检测题目多选列表"></div>
+        </div>
+        <label class="auto-bank-rotate"><input type="checkbox" id="autoBankRotate"> 开启题目轮换</label>
+        <button class="primary" type="button" id="autoBankSave">保存自动题库</button>
+      </div>
+      <p id="autoBankHint" class="field-hint">关闭轮换时固定运行列表中第一道选中的题；开启后按选中题目轮换。失败复测与隔离恢复始终固定同一道题。</p>
+      <p id="autoBankNotice" class="inline-state" role="status" aria-live="polite"></p>
+    </section>
     <p id="accountPromptHint" class="field-hint account-prompt-hint">题库选择用于下方「检测」按钮；定时巡检和自动隔离仍使用「牛奶推理」。其他题目仅保存结果，供人工评价。</p>
     <p id="accountNotice" class="inline-state" role="status" aria-live="polite"></p>
     <div class="section-heading account-subheading"><h2>监测账号</h2><span id="accountTargetCount" class="meta"></span></div>

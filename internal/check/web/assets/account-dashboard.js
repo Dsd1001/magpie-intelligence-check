@@ -9,6 +9,8 @@ export function initAccountViews({ request, onSummaryChange }) {
     accounts: [],
     models: [],
     prompts: [],
+    autoBank: { prompt_ids: ['milk'], rotate: true },
+    autoBankDirty: false,
     keys: [],
     targets: [],
     results: [],
@@ -133,6 +135,48 @@ export function initAccountViews({ request, onSummaryChange }) {
       ? '「' + selected.name + '」仅用于单次手动检测，回答可在历史中查看，不计入自动隔离。'
       : '该题目支持自动判分。启用自动检测的题目与牛奶题按小时轮换；单题首次错误后保持同题每 2 分钟复测，连续 3 次才可能触发隔离。';
   }
+  function renderAutoBank() {
+    if (state.autoBankDirty) return;
+    const eligible = state.prompts.filter(p => p.automatic);
+    const chosen = new Set(state.autoBank.prompt_ids || []);
+    const list = $('#autoBankOptions');
+    list.replaceChildren();
+    for (const prompt of eligible) {
+      const label = text('label', '', 'auto-bank-item');
+      const check = document.createElement('input');
+      check.type = 'checkbox'; check.value = prompt.id; check.checked = chosen.has(prompt.id);
+      check.onchange = () => { state.autoBankDirty = true; updateAutoBankCount(); };
+      label.append(check, text('span', prompt.name));
+      list.append(label);
+    }
+    $('#autoBankRotate').checked = Boolean(state.autoBank.rotate);
+    $('#autoBankCount').textContent = String(chosen.size);
+    $('#autoBankStatus').textContent = state.autoBank.configured ? '已保存' : '默认：全部自动题';
+  }
+  function updateAutoBankCount() {
+    $('#autoBankCount').textContent = String($('#autoBankOptions').querySelectorAll('input:checked').length);
+  }
+  $('#autoBankDropdown').onclick = () => {
+    const el = $('#autoBankOptions');
+    el.hidden = !el.hidden;
+    $('#autoBankDropdown').setAttribute('aria-expanded', String(!el.hidden));
+  };
+  $('#autoBankRotate').onchange = () => { state.autoBankDirty = true; };
+  $('#autoBankSave').onclick = () => perform($('#autoBankSave'), async () => {
+    const prompt_ids = [...$('#autoBankOptions').querySelectorAll('input:checked')].map(x=>x.value);
+    if (!prompt_ids.length) throw Error('请至少选择一道自动检测题目');
+    const result = await request('/api/account-auto-prompts', {
+      prompt_ids, rotate: $('#autoBankRotate').checked,
+    });
+    state.autoBank = result;
+    state.autoBankDirty = false;
+    $('#autoBankOptions').hidden = true;
+    $('#autoBankDropdown').setAttribute('aria-expanded','false');
+    renderAutoBank();
+    notice('#autoBankNotice', '自动题库已保存。' +
+      (result.rotate ? '已开启轮换。' : '已关闭轮换，固定使用第一道选中题。'));
+  }, '#autoBankNotice');
+
   function renderTargets() {
     const rows = [...state.targets].sort((a, b) =>
       (email(a.account) + '/' + a.model).localeCompare(email(b.account) + '/' + b.model, 'zh-CN'));
@@ -330,8 +374,10 @@ export function initAccountViews({ request, onSummaryChange }) {
       state.targets = Object.values(accountState.targets || {});
       state.results = accountState.results || [];
       state.route = routing.route || {};
+      state.autoBank = accountState.auto_prompt_policy || state.autoBank;
       state.loaded = true;
       refreshSelectors();
+      renderAutoBank();
       updateRouteForm();
       renderTargets();
       renderHistory();
@@ -360,6 +406,7 @@ export function initAccountViews({ request, onSummaryChange }) {
   function setPrompts(prompts) {
     state.prompts = prompts || [];
     refreshSelectors();
+    renderAutoBank();
     promptHint();
     renderHistory();
   }

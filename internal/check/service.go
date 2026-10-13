@@ -95,15 +95,16 @@ func (s *Service) DeleteTarget(model string) error {
 }
 
 type State struct {
-	Config         Config                    `json:"config"`
-	Targets        map[string]*Target        `json:"targets"`
-	Results        []Result                  `json:"results"`
-	AccountTargets map[string]*AccountTarget `json:"account_targets,omitempty"`
-	AccountResults []AccountResult           `json:"account_results,omitempty"`
-	CustomPrompts  []Prompt                  `json:"custom_prompts,omitempty"`
-	Route          RoutingState              `json:"route,omitempty"`
-	Alias          string                    `json:"alias"`
-	ClearedUsage   map[string]map[string]int `json:"cleared_usage,omitempty"`
+	Config           Config                    `json:"config"`
+	Targets          map[string]*Target        `json:"targets"`
+	Results          []Result                  `json:"results"`
+	AccountTargets   map[string]*AccountTarget `json:"account_targets,omitempty"`
+	AccountResults   []AccountResult           `json:"account_results,omitempty"`
+	CustomPrompts    []Prompt                  `json:"custom_prompts,omitempty"`
+	AutoPromptPolicy AutoPromptPolicy          `json:"auto_prompt_policy,omitempty"`
+	Route            RoutingState              `json:"route,omitempty"`
+	Alias            string                    `json:"alias"`
+	ClearedUsage     map[string]map[string]int `json:"cleared_usage,omitempty"`
 }
 
 func (s *Service) ClearResults(ids []string) error {
