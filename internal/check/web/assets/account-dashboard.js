@@ -8,6 +8,7 @@ export function initAccountViews({ request, onSummaryChange }) {
     active: 'models',
     accounts: [],
     models: [],
+    prompts: [],
     keys: [],
     targets: [],
     results: [],
@@ -107,6 +108,9 @@ export function initAccountViews({ request, onSummaryChange }) {
     const modelOptions = [['', state.models.length ? '选择模型' : '请先连接网关并刷新模型'],
       ...state.models.map(m => [m.id, m.id])];
     syncSelect($('#accountModel'), modelOptions);
+    syncSelect($('#accountPrompt'), state.prompts.length
+      ? state.prompts.map(p => [p.id, p.name + (p.automatic ? ' · 自动判分' : ' · 人工评价')])
+      : [['milk', '牛奶推理 · 自动判分']]);
     const historyList = [['', '全部账号'], ...state.accounts.map(a => [a.id, a.user])];
     syncSelect($('#accountHistoryFilter'), historyList);
 
@@ -121,6 +125,14 @@ export function initAccountViews({ request, onSummaryChange }) {
     }
   }
 
+  function chosenPrompt() { return $('#accountPrompt').value || 'milk'; }
+  function promptName(id) { return state.prompts.find(p => p.id === id)?.name || id || '题目已移除'; }
+  function promptHint() {
+    const selected = state.prompts.find(p => p.id === chosenPrompt());
+    $('#accountPromptHint').textContent = selected && !selected.automatic
+      ? '「' + selected.name + '」仅用于单次手动检测，回答可在历史中查看，不计入自动隔离。'
+      : '该题目支持自动判分。启用自动检测的题目与牛奶题按小时轮换；单题首次错误后保持同题每 2 分钟复测，连续 3 次才可能触发隔离。';
+  }
   function renderTargets() {
     const rows = [...state.targets].sort((a, b) =>
       (email(a.account) + '/' + a.model).localeCompare(email(b.account) + '/' + b.model, 'zh-CN'));
@@ -162,8 +174,9 @@ export function initAccountViews({ request, onSummaryChange }) {
       const group = text('div', '', 'actions');
       group.append(
         action('检测', () => perform(group.children[0], async () => {
-          await request('/api/account-test', { account: t.account, model: t.model, prompt: 'milk' });
-          notice('#accountNotice', '已开始检测 ' + email(t.account));
+          const prompt = chosenPrompt();
+          await request('/api/account-test', { account: t.account, model: t.model, prompt });
+          notice('#accountNotice', '已开始对 ' + email(t.account) + ' 运行「' + promptName(prompt) + '」');
           await refreshState();
         }), 'secondary', !t.enabled || t.state === 'checking'),
         action(t.enabled ? '暂停' : '启用', () => perform(group.children[1], async () => {
@@ -187,7 +200,7 @@ export function initAccountViews({ request, onSummaryChange }) {
     const selected = $('#accountHistoryFilter').value;
     const records = state.results.filter(r => !selected || stableID(r.account) === selected).slice(-35).reverse();
     if (!records.length) {
-      empty(tbody, 5, '暂无检测记录');
+      empty(tbody, 6, '暂无检测记录');
       return;
     }
     const statuses = {
@@ -199,13 +212,30 @@ export function initAccountViews({ request, onSummaryChange }) {
       rowCell(tr, '检测时间', time(r.time), 'numeric');
       rowCell(tr, '账号邮箱', email(r.account), 'email');
       rowCell(tr, '模型', r.model, 'model-id');
+      rowCell(tr, '检测题目', r.prompt_name || promptName(r.prompt));
       const [value, style] = statuses[r.verdict] || ['未确认', 'unverified'];
       const verdict = rowCell(tr, '检测结果', '');
       verdict.append(text('span', value, 'state ' + style));
+      if (r.answer || r.error) {
+        const button = text('button', '查看回答', 'text-button account-show-answer');
+        button.type = 'button';
+        button.onclick = () => showAnswer(r);
+        verdict.append(button);
+      }
       rowCell(tr, 'Token', String(r.tokens || 0), 'numeric');
       if (r.error) tr.title = displayError(r.error);
       tbody.append(tr);
     }
+  }
+
+  function showAnswer(record) {
+    const dialog = $('#accountAnswerDialog');
+    $('#accountAnswerTitle').textContent = record.prompt_name || promptName(record.prompt);
+    $('#accountAnswerMeta').textContent =
+      email(record.account) + ' · ' + record.model + ' · ' + time(record.time);
+    $('#accountAnswerText').textContent = record.answer ||
+      (record.error ? displayError(record.error) : '本次请求没有返回回答正文');
+    dialog.showModal();
   }
 
   function updateRouteForm() {
@@ -327,6 +357,22 @@ export function initAccountViews({ request, onSummaryChange }) {
     state.models = [...(models || [])].sort((a, b) => a.id.localeCompare(b.id));
     refreshSelectors();
   }
+  function setPrompts(prompts) {
+    state.prompts = prompts || [];
+    refreshSelectors();
+    promptHint();
+    renderHistory();
+  }
+  $('#accountPrompt').onchange = promptHint;
+  $('#accountAnswerClose').onclick = () => $('#accountAnswerDialog').close();
+  $('#accountAnswerDialog').onclick = event => {
+    if (event.target === $('#accountAnswerDialog')) event.target.close();
+  };
+  $('#openCustomPrompts').onclick = () => {
+    window.location.hash = '#tests';
+    $('#customPromptManager').open = true;
+    $('#customPromptForm').elements.name.focus();
+  };
 
   accountForm.onsubmit = event => {
     event.preventDefault();
@@ -441,5 +487,5 @@ export function initAccountViews({ request, onSummaryChange }) {
     }
   }, 10000);
 
-  return { activate, reload, setModels, statistics };
+  return { activate, reload, setModels, setPrompts, statistics };
 }

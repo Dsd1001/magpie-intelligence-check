@@ -21,9 +21,9 @@ function feedback(value, success = false) {
   $('#message').textContent = value;
   $('#message').className = 'feedback' + (success ? ' success' : '');
 }
-async function request(path, body) {
+async function request(path, body, method) {
   const response = await fetch(path, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: method || (body === undefined ? 'GET' : 'POST'),
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -280,6 +280,119 @@ function updateOverview() {
   $('#statReview').textContent = models.filter(t => t.enabled && ['review', 'unavailable'].includes(t.state)).length + accounts.review;
   $('#statRequests').textContent = dayCount() + accounts.today;
 }
+const customPromptForm = $('#customPromptForm');
+
+function customPromptFeedback(message, error = false) {
+  const target = $('#customPromptNotice');
+  target.textContent = message;
+  target.className = 'inline-state' + (error ? ' error' : ' success');
+}
+function updateCustomAutoFields() {
+  const auto = $('#customPromptMode').value === 'automatic';
+  $('#customPromptAutomaticFields').hidden = !auto;
+  $('#customPromptAnswers').required = auto;
+}
+function resetCustomPromptForm() {
+  customPromptForm.reset();
+  customPromptForm.elements.id.value = '';
+  $('#customPromptAutoConfirm').checked = false;
+  updateCustomAutoFields();
+  $('#customPromptSave').replaceChildren(icon('Check'), text('span', '保存题目'));
+}
+$('#customPromptMode').onchange = updateCustomAutoFields;
+updateCustomAutoFields();
+function renderCustomPromptList() {
+  if (!data?.prompts) return;
+  const prompts = data.prompts.filter(p => p.custom);
+  $('#customPromptCount').textContent = prompts.length + ' 道自定义题目';
+  const list = $('#customPromptItems');
+  list.replaceChildren();
+  if (!prompts.length) {
+    list.append(text('p', '暂无自定义题目。填写上方表单即可新建。', 'empty-state'));
+    return;
+  }
+  for (const prompt of prompts) {
+    const item = text('div', '', 'custom-prompt-item');
+    const detail = text('div');
+    detail.append(text('strong', prompt.name));
+    detail.append(text('span',
+      prompt.automatic ? '自动巡检 · 严格答案匹配 · ' + (prompt.expected_answers?.length || 0) + ' 个正确答案'
+        : '仅手动检测 · 人工评价', 'custom-prompt-mode'));
+    const preview = prompt.text.length > 120 ? prompt.text.slice(0, 120) + '…' : prompt.text;
+    detail.append(text('p', preview));
+    const actions = text('div', '', 'account-toolbar');
+    const edit = text('button', '编辑', 'secondary');
+    edit.type = 'button';
+    edit.onclick = () => {
+      customPromptForm.elements.id.value = prompt.id;
+      customPromptForm.elements.name.value = prompt.name;
+      customPromptForm.elements.text.value = prompt.text;
+      customPromptForm.elements.guidance.value = prompt.guidance || '';
+      $('#customPromptMode').value = prompt.automatic ? 'automatic' : 'manual';
+      $('#customPromptAnswers').value = (prompt.expected_answers || []).join('\n');
+      $('#customPromptAutoConfirm').checked = false;
+      updateCustomAutoFields();
+      $('#customPromptSave').replaceChildren(icon('Check'), text('span', '保存修改'));
+      customPromptFeedback('正在编辑「' + prompt.name + '」');
+      customPromptForm.elements.name.focus();
+    };
+    const remove = text('button', '删除', 'text-button');
+    remove.type = 'button';
+    remove.onclick = () => pending(remove, async () => {
+      if (!confirm('确定删除自定义题「' + prompt.name + '」？已产生的检测记录会保留。')) return;
+      await request('/api/prompts/custom/' + encodeURIComponent(prompt.id), undefined, 'DELETE');
+      if (customPromptForm.elements.id.value === prompt.id) resetCustomPromptForm();
+      customPromptFeedback('已删除「' + prompt.name + '」；历史检测结果仍保留。');
+      await refresh();
+    }, $('#customPromptNotice'));
+    actions.append(edit, remove);
+    item.append(detail, actions);
+    list.append(item);
+  }
+}
+customPromptForm.onsubmit = event => {
+  event.preventDefault();
+  pending($('#customPromptSave'), async () => {
+    const values = Object.fromEntries(new FormData(customPromptForm));
+    const id = values.id;
+    delete values.id;
+    values.automatic = values.mode === 'automatic';
+    delete values.mode;
+    values.expected_answers = (values.answers || '').split('\n').map(x => x.trim()).filter(Boolean);
+    delete values.answers;
+    if (!values.name.trim() || !values.text.trim()) {
+      throw Error('请填写题目名称和完整题目内容');
+    }
+    if (values.automatic) {
+      if (values.expected_answers.length === 0) {
+        throw Error('自动检测必须填写至少一个明确的预期正确答案');
+      }
+      if (!$('#customPromptAutoConfirm').checked) {
+        throw Error('请先确认：自动检测题目可能影响生产账号隔离');
+      }
+    }
+    if (id) {
+      await request('/api/prompts/custom/' + encodeURIComponent(id), values, 'PUT');
+    } else {
+      const prompt = await request('/api/prompts/custom', values);
+      $('#prompt').dataset.options = ''; // force next select rebuild
+      // Select new prompt in the Quality Library after the refresh.
+      await refresh();
+      $('#prompt').value = prompt.id;
+      showPrompt();
+      resetCustomPromptForm();
+      customPromptFeedback('新题目「' + values.name + '」已加入题库：' +
+        (values.automatic ? '参与每小时轮换自动巡检；请先验证答案匹配。' : '仅用于手动检测。'));
+      return;
+    }
+    resetCustomPromptForm();
+    await refresh();
+    customPromptFeedback('自定义题目已更新。' +
+      (values.automatic ? ' 自动检测会使用新的标准答案；旧连续判定已重置。' : ' 当前仅手动检测。'));
+  }, $('#customPromptNotice'));
+};
+$('#customPromptReset').onclick = resetCustomPromptForm;
+
 async function refresh() {
   if (polling || stopped) return;
   polling = true;
@@ -299,6 +412,9 @@ async function refresh() {
     updateOverview();
     syncSelect($('#model'), targets.map(t => [t.model, t.model + (t.enabled ? '' : '（监测关闭）')]));
     syncSelect($('#prompt'), data.prompts.map(p => [p.id, p.name]));
+    $('#promptCount').textContent = data.prompts.length + ' 道题目';
+    accountUI?.setPrompts(data.prompts);
+    renderCustomPromptList();
     syncSelect($('#historyModel'), [['', '全部模型'], ...[...new Set([...targets.map(t => t.model), ...data.state.results.map(r => r.model)])].map(m => [m, m])]);
     showPrompt(); renderTargets(); renderControls(); renderHistory();
     $('#lastSync').textContent = '更新于 ' + dateTime(new Date().toISOString());

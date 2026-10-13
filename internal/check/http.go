@@ -94,7 +94,61 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 				logHealth = "日志源可读"
 			}
 		}
-		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": Prompts, "guidance": Guidance})
+		guidance := make(map[string]string, len(Guidance)+len(state.CustomPrompts))
+		for id, description := range Guidance {
+			guidance[id] = description
+		}
+		for _, p := range state.CustomPrompts {
+			guidance[p.ID] = p.Guidance
+			if strings.TrimSpace(p.Guidance) == "" {
+				guidance[p.ID] = "自定义题目仅用于手动评价，不参与自动判分与账号隔离。"
+			}
+		}
+		writeJSON(w, map[string]any{"state": state, "health": health, "log_health": logHealth, "last_activity": lastActivity, "gateway_configured": gatewayConfigured, "prompts": s.PromptCatalog(), "guidance": guidance})
+	})
+	// User-added questions are always manual-only and preserved in the
+	// same SQLite state as the rest of the plugin.
+	mux.HandleFunc("POST /api/prompts/custom", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Name            string   `json:"name"`
+			Text            string   `json:"text"`
+			Guidance        string   `json:"guidance"`
+			Automatic       bool     `json:"automatic"`
+			ExpectedAnswers []string `json:"expected_answers"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		p, err := s.AddCustomPrompt(input.Name, input.Text, input.Guidance, input.Automatic, input.ExpectedAnswers)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, p)
+	})
+	mux.HandleFunc("PUT /api/prompts/custom/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Name            string   `json:"name"`
+			Text            string   `json:"text"`
+			Guidance        string   `json:"guidance"`
+			Automatic       bool     `json:"automatic"`
+			ExpectedAnswers []string `json:"expected_answers"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if err := s.UpdateCustomPrompt(r.PathValue("id"), input.Name, input.Text, input.Guidance, input.Automatic, input.ExpectedAnswers); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("DELETE /api/prompts/custom/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.DeleteCustomPrompt(r.PathValue("id")); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /api/results/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()

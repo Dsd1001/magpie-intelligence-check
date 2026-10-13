@@ -19,18 +19,21 @@ type AccountTarget struct {
 	CheckedAt         time.Time `json:"checked_at,omitempty"`
 	ConsecutivePasses int       `json:"consecutive_passes"`
 	ConsecutiveFails  int       `json:"consecutive_fails"`
+	LastAutoPrompt    string    `json:"last_auto_prompt,omitempty"`
+	PromptRotation    uint64    `json:"prompt_rotation,omitempty"`
 }
 
 type AccountResult struct {
-	ID      string    `json:"id"`
-	Account string    `json:"account"`
-	Model   string    `json:"model"`
-	Prompt  string    `json:"prompt"`
-	Verdict string    `json:"verdict"`
-	Time    time.Time `json:"time"`
-	Answer  string    `json:"answer,omitempty"`
-	Error   string    `json:"error,omitempty"`
-	Tokens  int       `json:"tokens"`
+	ID         string    `json:"id"`
+	Account    string    `json:"account"`
+	Model      string    `json:"model"`
+	Prompt     string    `json:"prompt"`
+	PromptName string    `json:"prompt_name,omitempty"`
+	Verdict    string    `json:"verdict"`
+	Time       time.Time `json:"time"`
+	Answer     string    `json:"answer,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	Tokens     int       `json:"tokens"`
 }
 
 func ValidateAccount(account string) error {
@@ -130,13 +133,13 @@ func (s *Service) TriggerAccount(account, model, prompt string) error {
 	if err := validateAccountModel(model); err != nil {
 		return err
 	}
-	p, ok := FindPrompt(prompt)
-	if !ok {
-		return errors.New("未知检测题目")
-	}
 	id := accountTargetID(account, model)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p, ok := s.findPromptLocked(prompt)
+	if !ok {
+		return errors.New("未知检测题目")
+	}
 	target := s.state.AccountTargets[id]
 	if target == nil || !target.Enabled {
 		return errors.New("该账号及模型尚未启用监测")
@@ -165,10 +168,15 @@ func (s *Service) TriggerAccount(account, model, prompt string) error {
 	if count+1 > cfg.DailyLimit {
 		return errors.New("今日检测额度不足，无法启动账号探针")
 	}
-	target.State = "checking"
-	target.Reason = ""
-	if err := s.saveLocked(); err != nil {
-		return err
+	// Only automatically graded questions may change the target's
+	// quality state. Manual question runs must not reset suspicion,
+	// recovery counters, or the next scheduled milk probe.
+	if p.Automatic {
+		target.State = "checking"
+		target.Reason = ""
+		if err := s.saveLocked(); err != nil {
+			return err
+		}
 	}
 	s.accountProbeActive = true
 	alias := s.state.Alias
@@ -186,7 +194,7 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 	// One answer per round, with no immediate retry.
 	answer, tokens, err := CallAccount(ctx, cfg, "quality-probe/"+alias+"/"+model, account, p.Text)
 	record := AccountResult{
-		ID: Secret()[:12], Account: account, Model: model, Prompt: p.ID,
+		ID: Secret()[:12], Account: account, Model: model, Prompt: p.ID, PromptName: p.Name,
 		Time: time.Now(), Tokens: tokens, Answer: answer,
 	}
 	if len(record.Answer) > 8*1024 {
@@ -197,7 +205,7 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 		record.Verdict, record.Error = "unavailable", err.Error()
 		reason = err.Error()
 	} else {
-		verdict = Grade(p.ID, answer)
+		verdict = gradeConfiguredPrompt(p, answer)
 		record.Verdict = verdict
 	}
 	s.mu.Lock()
@@ -210,21 +218,29 @@ func (s *Service) runAccount(parent context.Context, id, account, model, alias s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.accountProbeActive = false
+	if !p.Automatic {
+		// Manual questions are evidence for the operator only. They are
+		// never an input to quarantine or recovery, even after a network
+		// error or a previously suspicious account's manual recheck.
+		return
+	}
 	t := s.state.AccountTargets[id]
 	if t == nil {
 		return
 	}
 	t.CheckedAt = time.Now()
+	t.LastAutoPrompt = p.ID
 	switch verdict {
 	case "passed":
 		t.State, t.Reason = "passed", ""
 		t.ConsecutivePasses++
 		t.ConsecutiveFails = 0
+		t.PromptRotation++
 	case "failed":
 		t.ConsecutiveFails++
 		t.ConsecutivePasses = 0
 		t.State = "suspect"
-		t.Reason = fmt.Sprintf("推理题回答与预期不符（连续 %d 次）", t.ConsecutiveFails)
+		t.Reason = fmt.Sprintf("自动题「%s」回答与预期不符（连续 %d 次）", p.Name, t.ConsecutiveFails)
 	case "manual":
 		t.State = "manual"
 		t.Reason = "人工题不能用于自动判定账号质量"

@@ -100,6 +100,7 @@ type State struct {
 	Results        []Result                  `json:"results"`
 	AccountTargets map[string]*AccountTarget `json:"account_targets,omitempty"`
 	AccountResults []AccountResult           `json:"account_results,omitempty"`
+	CustomPrompts  []Prompt                  `json:"custom_prompts,omitempty"`
 	Route          RoutingState              `json:"route,omitempty"`
 	Alias          string                    `json:"alias"`
 	ClearedUsage   map[string]map[string]int `json:"cleared_usage,omitempty"`
@@ -375,7 +376,7 @@ func (s *Service) Trigger(model, prompt string, manual bool) error {
 	if !manual && t.RetryAfter.After(time.Now()) {
 		return nil
 	}
-	p, ok := FindPrompt(prompt)
+	p, ok := s.findPromptLocked(prompt)
 	if !ok {
 		return errors.New("未知题目")
 	}
@@ -467,7 +468,7 @@ func (s *Service) run(ctx context.Context, model string, p Prompt) {
 				r.Error = "检测已取消"
 			}
 		} else {
-			r.Verdict = Grade(p.ID, answer)
+			r.Verdict = gradeConfiguredPrompt(p, answer)
 		}
 		s.mu.Lock()
 		s.state.Results[idx] = r

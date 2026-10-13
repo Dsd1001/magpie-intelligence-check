@@ -33,10 +33,16 @@
 .account-steps svg { width: 15px; height: 15px; }
 .account-add-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   align-items: end;
 }
+.account-prompt-hint {
+  display: block;
+  margin-top: 12px;
+  line-height: 1.75;
+}
+.account-add-actions { grid-column: 1 / -1; }
 .account-add-actions, .account-toolbar {
   display: flex;
   gap: 8px;
@@ -76,11 +82,12 @@
 .account-targets-table .state.isolated { color: var(--accent); }
 .account-targets-table .state.suspect { color: var(--warning); }
 .account-targets-table .state.unverified { color: var(--muted); }
-.account-history-table th:first-child { width: 20%; }
-.account-history-table th:nth-child(2) { width: 26%; }
-.account-history-table th:nth-child(3) { width: 25%; }
-.account-history-table th:nth-child(4) { width: 20%; }
-.account-history-table th:last-child { width: 9%; text-align: right; }
+.account-history-table th:first-child { width: 15%; }
+.account-history-table th:nth-child(2) { width: 24%; }
+.account-history-table th:nth-child(3) { width: 22%; }
+.account-history-table th:nth-child(4) { width: 18%; }
+.account-history-table th:nth-child(5) { width: 14%; }
+.account-history-table th:last-child { width: 7%; text-align: right; }
 .account-history-table td:last-child { text-align: right; }
 .account-history-table tr[title] { cursor: help; }
 .account-view .empty-state { width: 100%; }
@@ -200,6 +207,7 @@
 
 @media(max-width:1140px) {
   .account-add-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-add-form label:nth-child(3) { grid-column: 1 / -1; }
   .account-add-actions { grid-column: 1 / -1; }
 }
 @media(max-width:960px) {
@@ -211,6 +219,7 @@
   .tabs { gap: 24px; justify-content: flex-start; margin-bottom: 24px; }
   .tabs button { padding: 12px 0 15px; }
   .account-add-form, .routing-fields { grid-template-columns: minmax(0, 1fr); }
+  .account-add-form label:nth-child(3) { grid-column: 1; }
   .account-add-actions { grid-column: 1; }
   .account-add-actions button { flex: 1 1 auto; }
   .account-add-actions .icon-button { flex: 0 0 42px; }
@@ -249,3 +258,78 @@
   .routing-key .key-scopes { grid-template-columns: 1fr; }
   .routing-key .key-scopes > span { display: none; }
 }
+
+/* Native prompt-bank editor: same tokens and typography as the dashboard. */
+.custom-prompt-manager {
+  border-top: 1px solid var(--line);
+  margin-top: 36px;
+  padding: 22px 0;
+}
+.custom-prompt-manager summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.custom-prompt-manager summary svg { width: 17px; height: 17px; }
+.custom-prompt-form {
+  display: grid;
+  gap: 16px;
+  margin: 24px 0 16px;
+  max-width: 900px;
+}
+.custom-prompt-form textarea { resize: vertical; min-height: 90px; }
+.custom-prompt-list { border-top: 1px solid var(--line); }
+.custom-prompt-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 17px 0;
+}
+.custom-prompt-item > div { min-width: 0; }
+.custom-prompt-item strong {
+  display: block;
+  color: var(--headline);
+  font-weight: 500;
+  line-height: 1.6;
+}
+.custom-prompt-item p { margin: 6px 0 0; color: var(--muted); font-size: var(--small); line-height: 1.65; overflow-wrap: anywhere; }
+.custom-prompt-item .account-toolbar { flex-shrink: 0; }
+.account-show-answer { margin-left: 8px; font-size: var(--small); }
+.account-answer-dialog {
+  width: min(780px, calc(100vw - 30px));
+  max-height: min(740px, calc(100vh - 30px));
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 28px;
+}
+.account-answer-dialog::backdrop { background: rgba(0,0,0,.65); }
+.account-answer-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 60vh; overflow: auto; font-size: var(--small); }
+@media(max-width:680px) {
+  .custom-prompt-item { display: block; }
+  .custom-prompt-item .account-toolbar { margin-top: 12px; }
+  .account-answer-dialog { padding: 16px; }
+}
+
+.custom-auto-options {
+  padding: 17px 19px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+.custom-auto-options[hidden] { display: none; }
+.custom-auto-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text);
+  font-size: var(--small);
+  line-height: 1.6;
+}
+.custom-auto-warning input { width: auto; margin-top: 4px; flex-shrink: 0; }
+.custom-prompt-mode { color: var(--muted); font-size: var(--small); }

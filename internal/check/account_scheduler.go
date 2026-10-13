@@ -65,6 +65,23 @@ func quarantinedAccount(account string, quarantined map[string]bool, known []Cod
 	return err == nil && quarantined[id]
 }
 
+// selectAutomaticPrompt rotates configured objective questions while healthy,
+// but sticks to the SAME failed question for two-minute confirmation and
+// while quarantined. No extra calls per hour are introduced.
+func selectAutomaticPrompt(t AccountTarget, isolated bool, prompts []Prompt) string {
+	if len(prompts) == 0 {
+		return "milk" // fail-safe default from built-in prompts
+	}
+	if t.LastAutoPrompt != "" && (t.ConsecutiveFails > 0 || isolated) {
+		for _, p := range prompts {
+			if p.ID == t.LastAutoPrompt {
+				return p.ID
+			}
+		}
+	}
+	return prompts[int(t.PromptRotation%uint64(len(prompts)))].ID
+}
+
 // ScheduleOneAccount runs at most one fresh probe. It never starts a
 // second probe while one is active, and tests the oldest due account first.
 func (s *Service) ScheduleOneAccount(now time.Time) error {
@@ -77,6 +94,7 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 	for _, target := range s.state.AccountTargets {
 		targets = append(targets, *target)
 	}
+	automaticPrompts := s.activeAccountPromptsLocked()
 	quarantined := make(map[string]bool, len(s.state.Route.Quarantined))
 	for id, active := range s.state.Route.Quarantined {
 		if active {
@@ -99,6 +117,7 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 	}
 	type pending struct {
 		account, model string
+		prompt         string
 		checked        time.Time
 		priority       int
 	}
@@ -113,7 +132,8 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 				(!isolated && target.State == "suspect" && target.ConsecutiveFails > 0) {
 				priority = 0
 			}
-			list = append(list, pending{account: target.Account, model: target.Model, checked: target.CheckedAt, priority: priority})
+			prompt := selectAutomaticPrompt(target, isolated, automaticPrompts)
+			list = append(list, pending{account: target.Account, model: target.Model, prompt: prompt, checked: target.CheckedAt, priority: priority})
 		}
 	}
 	if len(list) == 0 {
@@ -131,7 +151,7 @@ func (s *Service) ScheduleOneAccount(now time.Time) error {
 		}
 		return list[i].checked.Before(list[j].checked)
 	})
-	return s.TriggerAccount(list[0].account, list[0].model, "milk")
+	return s.TriggerAccount(list[0].account, list[0].model, list[0].prompt)
 }
 
 // StartAccountScheduler is called by the owned Go service, NOT by New,

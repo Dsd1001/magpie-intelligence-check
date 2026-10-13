@@ -1,6 +1,6 @@
 {
   "name": "magpie-account-quality-check",
-  "version": "0.3.0-account.3",
+  "version": "0.3.0-account.4",
   "type": "module",
   "main": "./plugin/index.mjs",
   "files": [

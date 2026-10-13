@@ -2,10 +2,13 @@ package check
 
 // Prompt text is copied from the user-provided source; do not normalize whitespace.
 type Prompt struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Text      string `json:"text"`
-	Automatic bool   `json:"automatic"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Text            string   `json:"text"`
+	Automatic       bool     `json:"automatic"`
+	Custom          bool     `json:"custom,omitempty"`
+	Guidance        string   `json:"guidance,omitempty"`
+	ExpectedAnswers []string `json:"expected_answers,omitempty"`
 }
 
 // Evaluation guidance is not part of Text and must never be sent to the model.

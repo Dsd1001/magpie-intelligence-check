@@ -52,7 +52,7 @@
     </div>
   </section>
   <section id="view-tests" class="view" role="tabpanel" aria-labelledby="tab-tests" hidden>
-    <div class="section-heading"><h2>质量题库</h2><span class="meta">7 道题目</span></div>
+    <div class="section-heading"><h2>质量题库</h2><span class="meta" id="promptCount">7 道题目</span></div>
     <div class="test-controls">
       <label>测试模型<select id="model" aria-label="测试模型"></select></label>
       <label>测试题<select id="prompt" aria-label="测试题"></select></label>
@@ -77,6 +77,36 @@
       <div><details><summary>提示词原文</summary><pre id="promptText"></pre></details></div>
       <aside class="guidance"><h3>结果参考与限制</h3><p id="guidance"></p></aside>
     </div>
+    <details id="customPromptManager" class="custom-prompt-manager">
+      <summary><i data-icon="Plus"></i>自定义题库管理 <span id="customPromptCount" class="meta">0 道自定义题目</span></summary>
+      <p class="disclaimer">可为自定义题选择「仅手动检测」或「加入自动巡检」。自动题必须提供明确的标准答案，并使用严格匹配规则；可能触发连续错误隔离，请先测试准确性。</p>
+      <form id="customPromptForm" class="custom-prompt-form">
+        <input name="id" type="hidden">
+        <label>题目名称<input name="name" maxlength="100" placeholder="例如：多条件逻辑推理" required autocomplete="off"></label>
+        <label>完整题目内容<textarea name="text" rows="8" maxlength="24000" required placeholder="粘贴需要原样发送给模型的题目…"></textarea></label>
+        <label>检测方式
+          <select id="customPromptMode" name="mode" aria-label="选择自定义题检测方式">
+            <option value="manual">仅手动检测 · 不参与自动隔离</option>
+            <option value="automatic">参与自动检测 · 自动判分与隔离</option>
+          </select>
+        </label>
+        <div id="customPromptAutomaticFields" class="custom-auto-options" hidden>
+          <label>预期正确答案（每行一个等价答案）
+            <textarea id="customPromptAnswers" name="answers" rows="4" maxlength="2000" placeholder="例如：46.24 inches&#10;46.24" aria-label="自动检测预期正确答案"></textarea>
+          </label>
+          <p class="field-hint">严格比对最终回答与预期答案（忽略大小写、首尾与多余空白），不使用模糊匹配。自动题与内置牛奶题轮换，每个账号正常每小时仍只检测一次；同一自动题连续 3 次答错可能触发隔离。</p>
+          <label class="custom-auto-warning"><input id="customPromptAutoConfirm" type="checkbox"> 我已确认题目要求模型直接输出明确答案，接受该题可能影响自动隔离结果。</label>
+        </div>
+        <label>人工评价参考（选填，不发送给模型）<textarea name="guidance" rows="3" maxlength="4000" placeholder="预期结果、评价标准、注意事项…"></textarea></label>
+        <div class="account-toolbar">
+          <button class="primary" type="submit" id="customPromptSave"><i data-icon="Check"></i>保存题目</button>
+          <button class="secondary" type="button" id="customPromptReset">取消编辑</button>
+        </div>
+        <p id="customPromptNotice" class="inline-state" role="status" aria-live="polite"></p>
+      </form>
+      <div class="section-heading account-subheading"><h2>已保存的自定义题目</h2></div>
+      <div id="customPromptItems" class="custom-prompt-list"><p class="empty-state">暂无自定义题目</p></div>
+    </details>
   </section>
   <section id="view-fingerprint" class="view" role="tabpanel" aria-labelledby="tab-fingerprint" hidden>
     <div class="section-heading"><h2>ModelTrace</h2><span class="meta">18 个候选 / GPT + Claude</span></div>
@@ -123,12 +153,19 @@
           <option value="">请选择模型</option>
         </select>
       </label>
+      <label>手动检测题库
+        <select id="accountPrompt" name="prompt" aria-label="选择账号手动检测题目">
+          <option value="milk">牛奶推理 · 自动判分</option>
+        </select>
+      </label>
       <div class="account-add-actions">
         <button class="primary" type="submit"><i data-icon="Plus"></i>添加检测目标</button>
         <button class="secondary" id="accountAddAll" type="button"><i data-icon="Users"></i>添加所有账号</button>
+        <button class="secondary" id="openCustomPrompts" type="button"><i data-icon="Plus"></i>新增自定义题目</button>
         <button class="icon-button" id="accountRefresh" type="button" aria-label="刷新账号列表" data-tooltip="刷新账号列表" data-icon="RefreshCw"></button>
       </div>
     </form>
+    <p id="accountPromptHint" class="field-hint account-prompt-hint">题库选择用于下方「检测」按钮；定时巡检和自动隔离仍使用「牛奶推理」。其他题目仅保存结果，供人工评价。</p>
     <p id="accountNotice" class="inline-state" role="status" aria-live="polite"></p>
     <div class="section-heading account-subheading"><h2>监测账号</h2><span id="accountTargetCount" class="meta"></span></div>
     <div class="table-wrap">
@@ -143,13 +180,18 @@
     </div>
     <div class="table-wrap">
       <table class="account-history-table" aria-label="账号级探针记录">
-        <thead><tr><th>时间</th><th>账号邮箱</th><th>模型</th><th>结果</th><th>Token</th></tr></thead>
-        <tbody id="accountHistory"><tr><td colspan="5" class="empty-state">暂无检测记录</td></tr></tbody>
+        <thead><tr><th>时间</th><th>账号邮箱</th><th>模型</th><th>检测题目</th><th>结果</th><th>Token</th></tr></thead>
+        <tbody id="accountHistory"><tr><td colspan="6" class="empty-state">暂无检测记录</td></tr></tbody>
       </table>
     </div>
     <p class="disclaimer">检测不会停用订阅本身；隔离状态仅影响纳入管理的生产 Gateway Key。所有操作与检测结果均保存在插件数据目录。</p>
   </section>
 
+  <dialog id="accountAnswerDialog" class="account-answer-dialog" aria-labelledby="accountAnswerTitle">
+    <div class="section-heading"><h2 id="accountAnswerTitle">检测回答</h2><button id="accountAnswerClose" type="button" class="text-button" aria-label="关闭回答详情"><i data-icon="X"></i>关闭</button></div>
+    <p id="accountAnswerMeta" class="meta"></p>
+    <pre id="accountAnswerText"></pre>
+  </dialog>
   <section id="view-routing" class="view account-view" role="tabpanel" aria-labelledby="tab-routing" hidden>
     <div class="section-heading">
       <div><h2>自动检测与路由管理</h2><p class="section-description">独立检测 Key 不受隔离影响；生产 Key 保留各自原有账号权限。</p></div>
