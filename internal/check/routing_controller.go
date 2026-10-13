@@ -57,9 +57,35 @@ type RoutingPreview struct {
 // fields (including secret and usage settings) remain untouched in raw JSON.
 type privateGatewayKey struct {
 	ID       string   `json:"id"`
+	Name     string   `json:"name"`
 	Secret   string   `json:"secret"`
 	Accounts []string `json:"accounts"`
 	Off      bool     `json:"off"`
+}
+
+// GatewayKeyLabel holds ONLY public identifiers and display names.
+// Never expose the privateGatewayKey (which includes the secret) through
+// an HTTP API, a browser error, or a logging statement.
+type GatewayKeyLabel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Off  bool   `json:"off"`
+}
+
+func GatewayKeyLabels() ([]GatewayKeyLabel, error) {
+	dir, err := MagpieDir()
+	if err != nil {
+		return nil, err
+	}
+	_, keys, err := loadKeyDocuments(filepath.Join(dir, "caller-keys.json"))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GatewayKeyLabel, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, GatewayKeyLabel{ID: key.ID, Name: key.Name, Off: key.Off})
+	}
+	return out, nil
 }
 
 func loadKeyDocuments(path string) ([]map[string]json.RawMessage, []privateGatewayKey, error) {

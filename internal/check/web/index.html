@@ -7,6 +7,7 @@
   <title>Intelligence Check</title>
   <link rel="icon" href="/assets/icon.png">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/accounts.css">
   <script type="module" src="/assets/app.js"></script>
 </head>
 <body>
@@ -26,7 +27,7 @@
   <div id="message" class="feedback" role="alert"></div>
   <div id="connectionNotice" class="connection-notice" hidden><span>尚未连接 Magpie 网关</span><button id="connectSettings" class="text-button">连接设置 <i data-icon="ArrowUpRight"></i></button></div>
   <section class="overview" aria-label="监测概览">
-    <div class="stat"><span>监测模型</span><strong id="statEnabled">0</strong></div>
+    <div class="stat"><span>监测目标</span><strong id="statEnabled">0</strong></div>
     <div class="stat"><span>有效通过</span><strong id="statPassed">0</strong></div>
     <div class="stat"><span>待处理</span><strong id="statReview">0</strong></div>
     <div class="stat"><span>今日探针</span><strong id="statRequests">0</strong></div>
@@ -36,11 +37,13 @@
     <button id="tab-tests" role="tab" aria-selected="false" aria-controls="view-tests" tabindex="-1" data-view="tests"><i data-icon="FlaskConical"></i>质量题库</button>
     <button id="tab-fingerprint" role="tab" aria-selected="false" aria-controls="view-fingerprint" tabindex="-1" data-view="fingerprint"><i data-icon="Fingerprint"></i>模型指纹</button>
     <button id="tab-history" role="tab" aria-selected="false" aria-controls="view-history" tabindex="-1" data-view="history"><i data-icon="History"></i>检测记录</button>
+    <button id="tab-accounts" role="tab" aria-selected="false" aria-controls="view-accounts" tabindex="-1" data-view="accounts"><i data-icon="Users"></i>账号检测<span id="accountTabCount" class="tab-count">0</span></button>
+    <button id="tab-routing" role="tab" aria-selected="false" aria-controls="view-routing" tabindex="-1" data-view="routing"><i data-icon="ShieldCheck"></i>路由管理</button>
   </nav>
   <section id="view-models" class="view" role="tabpanel" aria-labelledby="tab-models">
     <div class="section-heading"><h2>主力模型</h2><span class="meta">通过结果有效期 15 分钟</span></div>
     <form id="target" class="add-target">
-      <label class="grow"><span class="sr-only">完整模型 ID</span><input name="model" list="catalog" aria-label="完整模型 ID" placeholder="provider/model" required autocomplete="off"><datalist id="catalog"></datalist></label>
+      <label class="grow"><span class="sr-only">选择模型</span><select id="targetModel" name="model" aria-label="选择模型" required><option value="">请选择模型（先连接网关）</option></select></label>
       <button type="button" id="loadModels" class="secondary"><i data-icon="RefreshCw"></i><span>刷新模型</span></button>
       <button class="primary"><i data-icon="Plus"></i><span>添加监测目标</span></button>
     </form>
@@ -98,6 +101,111 @@
     <details id="answerCompare"><summary>回答对比</summary><div class="history-controls"><label>回答 A<select id="compareA" aria-label="对比回答 A"></select></label><label>回答 B<select id="compareB" aria-label="对比回答 B"></select></label></div><div class="compare-columns"><div><p id="compareMetaA" class="meta"></p><pre id="compareTextA"></pre></div><div><p id="compareMetaB" class="meta"></p><pre id="compareTextB"></pre></div></div></details>
     <button id="loadHistory" class="secondary" hidden>加载更多记录</button>
   </section>
+  <section id="view-accounts" class="view account-view" role="tabpanel" aria-labelledby="tab-accounts" hidden>
+    <div class="section-heading">
+      <div><h2>账号质量监测</h2><p class="section-description">逐账号独立检测 · 仅比较有效回答 · 不可用不会被判断为质量下降</p></div>
+      <span class="meta" id="accountSummary">加载中</span>
+    </div>
+    <div class="account-steps" aria-label="检测规则">
+      <span><i data-icon="Clock3"></i>正常 1 小时</span>
+      <span><i data-icon="RotateCw"></i>异常 2 分钟复测</span>
+      <span><i data-icon="ShieldOff"></i>连续 3 次错误隔离</span>
+      <span><i data-icon="CheckCircle2"></i>连续 2 次正确恢复</span>
+    </div>
+    <form id="accountAddForm" class="account-add-form">
+      <label>选择账号（邮箱）
+        <select id="accountSelect" name="account" required aria-label="选择账号邮箱">
+          <option value="">正在加载账号…</option>
+        </select>
+      </label>
+      <label>检测模型
+        <select id="accountModel" name="model" required aria-label="选择账号检测模型">
+          <option value="">请选择模型</option>
+        </select>
+      </label>
+      <div class="account-add-actions">
+        <button class="primary" type="submit"><i data-icon="Plus"></i>添加检测目标</button>
+        <button class="secondary" id="accountAddAll" type="button"><i data-icon="Users"></i>添加所有账号</button>
+        <button class="icon-button" id="accountRefresh" type="button" aria-label="刷新账号列表" data-tooltip="刷新账号列表" data-icon="RefreshCw"></button>
+      </div>
+    </form>
+    <p id="accountNotice" class="inline-state" role="status" aria-live="polite"></p>
+    <div class="section-heading account-subheading"><h2>监测账号</h2><span id="accountTargetCount" class="meta"></span></div>
+    <div class="table-wrap">
+      <table class="account-targets-table" aria-label="各账号独立质量状态">
+        <thead><tr><th>账号邮箱</th><th>模型</th><th>检测状态</th><th>上次检测</th><th>操作</th></tr></thead>
+        <tbody id="accountTargets"><tr><td colspan="5" class="empty-state">正在读取检测目标…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="section-heading account-subheading">
+      <h2>最近账号探针</h2>
+      <label class="account-history-filter">筛选账号<select id="accountHistoryFilter" aria-label="筛选账号探针"><option value="">全部账号</option></select></label>
+    </div>
+    <div class="table-wrap">
+      <table class="account-history-table" aria-label="账号级探针记录">
+        <thead><tr><th>时间</th><th>账号邮箱</th><th>模型</th><th>结果</th><th>Token</th></tr></thead>
+        <tbody id="accountHistory"><tr><td colspan="5" class="empty-state">暂无检测记录</td></tr></tbody>
+      </table>
+    </div>
+    <p class="disclaimer">检测不会停用订阅本身；隔离状态仅影响纳入管理的生产 Gateway Key。所有操作与检测结果均保存在插件数据目录。</p>
+  </section>
+
+  <section id="view-routing" class="view account-view" role="tabpanel" aria-labelledby="tab-routing" hidden>
+    <div class="section-heading">
+      <div><h2>自动检测与路由管理</h2><p class="section-description">独立检测 Key 不受隔离影响；生产 Key 保留各自原有账号权限。</p></div>
+      <span id="routingMode" class="state">加载中</span>
+    </div>
+    <p id="routingNotice" class="inline-state" role="status" aria-live="polite"></p>
+    <form id="routingForm" class="routing-form">
+      <div class="routing-fields">
+        <label>检测专用 Gateway Key
+          <select name="probe_key_id" id="routingProbeKey" required aria-label="检测专用 Gateway Key">
+            <option value="">请选择检测 Key</option>
+          </select>
+        </label>
+        <label>预期 Codex 账号数量
+          <input name="expected_codex_count" type="number" min="0" max="100" step="1" aria-label="预期 Codex 账号数量">
+          <span class="field-hint" id="discoveredAccountCount">将自动读取 Magpie 账号</span>
+        </label>
+      </div>
+      <div class="routing-options">
+        <label class="routing-option">
+          <span class="routing-option-text"><strong>定时质量探针</strong><small>正常每小时 · 隔离后每 4 小时 · 异常快速复测</small></span>
+          <span class="toggle"><input type="checkbox" name="schedule_enabled" aria-label="开启定时探针"><span class="toggle-track"></span></span>
+        </label>
+        <label class="routing-option">
+          <span class="routing-option-text"><strong>自动隔离与恢复</strong><small>需验证检测 Key，确认后才自动更新生产路由</small></span>
+          <span class="toggle"><input type="checkbox" name="auto_apply" aria-label="允许自动隔离"><span class="toggle-track"></span></span>
+        </label>
+      </div>
+      <div id="routingEnableConfirm" class="routing-confirm" hidden>
+        <label>启用自动隔离需输入 <code>ENABLE_ALL_PRODUCTION_KEYS</code>
+          <input name="confirm" autocomplete="off" spellcheck="false" placeholder="输入确认短语" aria-label="自动隔离授权确认">
+        </label>
+      </div>
+      <div class="account-toolbar">
+        <button class="primary" type="submit" id="routingSave"><i data-icon="Check"></i>保存设置</button>
+        <button class="secondary" id="routingPreviewButton" type="button"><i data-icon="Eye"></i>预览白名单变化</button>
+      </div>
+    </form>
+    <section class="routing-preview" aria-labelledby="routingPreviewTitle">
+      <div class="section-heading"><h2 id="routingPreviewTitle">白名单预览</h2><span id="routingPreviewStatus" class="meta">尚未预览</span></div>
+      <div id="routingPreview" class="routing-preview-body"><p class="empty-state">保存检测 Key 设置后，可以预览各生产 Key 的账号路由变化。</p></div>
+    </section>
+    <details class="routing-safety">
+      <summary><i data-icon="ShieldAlert"></i>高级操作与安全恢复</summary>
+      <p class="disclaimer">操作生产 Key 前会检查管理员是否手动修改过权限。恢复会关闭自动隔离并尝试还原保存的原始白名单。</p>
+      <label>操作确认短语
+        <input id="routingActionConfirm" autocomplete="off" spellcheck="false" placeholder="请输入对应操作的确认短语" aria-label="路由操作确认短语">
+      </label>
+      <div class="account-toolbar">
+        <button class="secondary" id="routingApply" type="button">立即同步 <code>APPLY_QUARANTINE</code></button>
+        <button class="secondary" id="routingRestore" type="button">停止隔离并恢复 <code>RESTORE_ALL_PRODUCTION_KEYS</code></button>
+        <button class="text-button" id="routingRecover" type="button">检查未完成操作 <code>RECOVER_PENDING_JOURNAL</code></button>
+      </div>
+    </details>
+    <p class="disclaimer">首次启用前请验证全部账号能够独立检测，再预览权限变化。运行中的请求不会被中断。</p>
+  </section>
   <footer class="footer"><span>Intelligence Check</span><span id="lastSync">等待连接</span></footer>
 </main>
 <dialog id="settingsDialog" aria-labelledby="settingsTitle">
@@ -115,6 +223,6 @@
     <p id="configMessage" class="inline-state" role="status"></p>
   </form>
 </dialog>
-<a href="/accounts" style="position:fixed;bottom:14px;right:14px;z-index:20;border:1px solid #718096;background:#101827;color:#e2e8f0;border-radius:8px;padding:9px 13px;text-decoration:none;font:14px system-ui">账号独立检测（开发版） ↗</a>
+
 </body>
 </html>

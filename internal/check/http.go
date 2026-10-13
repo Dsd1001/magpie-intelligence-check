@@ -311,6 +311,14 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, map[string]any{"accounts": accounts})
 	})
+	mux.HandleFunc("GET /api/routing/keys", func(w http.ResponseWriter, r *http.Request) {
+		keys, err := GatewayKeyLabels()
+		if err != nil {
+			http.Error(w, err.Error(), 503)
+			return
+		}
+		writeJSON(w, map[string]any{"keys": keys})
+	})
 	mux.HandleFunc("GET /api/routing/settings", func(w http.ResponseWriter, r *http.Request) {
 		state, _ := s.Snapshot()
 		writeJSON(w, map[string]any{"route": state.Route})
@@ -420,23 +428,9 @@ func (s *Service) ManagedHandler(access *Access, console *Console) http.Handler 
 		}
 		writeJSON(w, map[string]string{"status": status})
 	})
+	// Old bookmarked URLs now lead into the unified main console.
 	mux.HandleFunc("GET /accounts", func(w http.ResponseWriter, r *http.Request) {
-		b, err := web.ReadFile("web/accounts.html")
-		if err != nil {
-			http.Error(w, "管理页面不可用", 500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(b)
-	})
-	mux.HandleFunc("GET /account-panel.js", func(w http.ResponseWriter, r *http.Request) {
-		b, err := web.ReadFile("web/account-panel.js")
-		if err != nil {
-			http.Error(w, "管理脚本不可用", 500)
-			return
-		}
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Write(b)
+		http.Redirect(w, r, "/#accounts", http.StatusFound)
 	})
 	mux.HandleFunc("POST /api/action", func(w http.ResponseWriter, r *http.Request) {
 		var a struct{ Model, Action, Prompt string }

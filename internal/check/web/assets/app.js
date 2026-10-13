@@ -3,8 +3,10 @@ import { renderModelTrace, runModelTrace } from '../modeltrace/panel.js';
 import { analyzeAnswer } from './answer-analysis.js';
 import { renderSVGPreview } from './svg-preview.js';
 import { renderHTMLPreview, stopHTMLPreview } from './html-preview.js';
+import { initAccountViews } from './account-dashboard.js';
 
 let data, polling = false, stopped = false, pollError = '', targetSignature, historySignature, historyLimit = 30;
+let accountUI; // initialized with the existing authenticated API client
 const config = $('#config');
 const secretType = 'pass' + 'word';
 config.elements.gateway_key.type = secretType;
@@ -42,6 +44,7 @@ async function pending(button, work, output = $('#message')) {
   finally { button.disabled = false; button.removeAttribute('aria-busy'); renderControls(); }
 }
 function selectView(name, focus = false) {
+  if (!document.querySelector(`#tab-${name}`)) return;
   if (name !== 'tests') stopHTMLPreview();
   document.querySelectorAll('[role=tab]').forEach(tab => {
     const active = tab.dataset.view === name;
@@ -50,6 +53,10 @@ function selectView(name, focus = false) {
     $(`#view-${tab.dataset.view}`).hidden = !active;
     if (active && focus) tab.focus();
   });
+  if (window.location.hash !== '#' + name) {
+    window.history.replaceState(null, '', '#' + name);
+  }
+  accountUI?.activate(name);
 }
 const tabs = [...document.querySelectorAll('[role=tab]')];
 tabs.forEach((tab, i) => {
@@ -264,6 +271,15 @@ function renderComparison() {
   }
 }
 $('#compareA').onchange = $('#compareB').onchange = renderComparison;
+function updateOverview() {
+  if (!data?.state) return;
+  const models = Object.values(data.state.targets);
+  const accounts = accountUI?.statistics() || { enabled: 0, passed: 0, review: 0, today: 0 };
+  $('#statEnabled').textContent = models.filter(t => t.enabled).length + accounts.enabled;
+  $('#statPassed').textContent = models.filter(validPass).length + accounts.passed;
+  $('#statReview').textContent = models.filter(t => t.enabled && ['review', 'unavailable'].includes(t.state)).length + accounts.review;
+  $('#statRequests').textContent = dayCount() + accounts.today;
+}
 async function refresh() {
   if (polling || stopped) return;
   polling = true;
@@ -280,10 +296,7 @@ async function refresh() {
     if (!configDirty) for (const key of ['gateway_url', 'log_path', 'daily_limit']) config.elements[key].value = data.state.config[key];
     const targets = Object.values(data.state.targets);
     $('#targetCount').textContent = targets.length;
-    $('#statEnabled').textContent = targets.filter(t => t.enabled).length;
-    $('#statPassed').textContent = targets.filter(validPass).length;
-    $('#statReview').textContent = targets.filter(t => t.enabled && ['review', 'unavailable'].includes(t.state)).length;
-    $('#statRequests').textContent = dayCount();
+    updateOverview();
     syncSelect($('#model'), targets.map(t => [t.model, t.model + (t.enabled ? '' : '（监测关闭）')]));
     syncSelect($('#prompt'), data.prompts.map(p => [p.id, p.name]));
     syncSelect($('#historyModel'), [['', '全部模型'], ...[...new Set([...targets.map(t => t.model), ...data.state.results.map(r => r.model)])].map(m => [m, m])]);
@@ -354,11 +367,19 @@ $('#traceRun').onclick = () => pending($('#traceRun'), async () => {
   if (!requireGateway()) return;
   await runModelTrace(request); feedback('已开始三条指纹挑战', true); await refresh();
 });
+async function loadGatewayModels(showToast = false) {
+  if (!data?.gateway_configured) return;
+  const models = await request('/api/models');
+  syncSelect($('#targetModel'), [
+    ['', models.length ? '选择要监测的模型' : '网关尚无可用模型'],
+    ...models.map(m => [m.id, m.id]),
+  ]);
+  accountUI?.setModels(models);
+  if (showToast) feedback(`已读取 ${models.length} 个模型`, true);
+}
 $('#loadModels').onclick = () => pending($('#loadModels'), async () => {
   if (!requireGateway()) return;
-  const models = await request('/api/models');
-  $('#catalog').replaceChildren(...models.map(m => { const option = text('option', m.group); option.value = m.id; return option; }));
-  feedback(`已读取 ${models.length} 个模型`, true);
+  await loadGatewayModels(true);
 });
 $('#target').onsubmit = event => {
   event.preventDefault();
@@ -388,6 +409,7 @@ config.onsubmit = event => {
     await saveConfig();
     $('#configMessage').textContent = '设置已保存，正在验证连接…';
     await checkConnection();
+    await loadGatewayModels();
   }, $('#configMessage'));
 };
 $('#checkConnection').onclick = () => pending($('#checkConnection'), async () => {
@@ -400,5 +422,20 @@ $('#closeRemote').onclick = () => pending($('#closeRemote'), async () => {
   await request('/api/console/close', {}); stopped = true;
   feedback('远程访问已结束，请从插件重新打开。');
 });
+accountUI = initAccountViews({ request, onSummaryChange: updateOverview });
 await refresh();
+if (data?.gateway_configured) {
+  try { await loadGatewayModels(); } catch (error) {
+    feedback('读取模型下拉列表失败：' + error.message);
+  }
+}
+// Account counts now belong to the same overview, even before opening
+// the account tab. Failures here do not block the normal model dashboard.
+await accountUI.reload();
+const initialView = window.location.hash.slice(1);
+if (document.querySelector(`#tab-${initialView}`)) selectView(initialView);
+window.addEventListener('hashchange', () => {
+  const name = window.location.hash.slice(1);
+  if (document.querySelector(`#tab-${name}`)) selectView(name);
+});
 setInterval(refresh, 3000);

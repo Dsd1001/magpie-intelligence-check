@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const lucide = require(process.argv[2] || 'lucide');
-const names = ['Activity', 'Settings2', 'Sun', 'Moon', 'RefreshCw', 'Plus', 'Play', 'Pause', 'Clock3', 'Download', 'Copy', 'Trash2', 'X', 'Search', 'Fingerprint', 'FlaskConical', 'History', 'Monitor', 'Check', 'Eye', 'EyeOff', 'ArrowUpRight', 'Power'];
+const names = ['Activity', 'Settings2', 'Sun', 'Moon', 'RefreshCw', 'Plus', 'Play', 'Pause', 'Clock3', 'Download', 'Copy', 'Trash2', 'X', 'Search', 'Fingerprint', 'FlaskConical', 'History', 'Monitor', 'Check', 'Eye', 'EyeOff', 'ArrowUpRight', 'Power', 'Users', 'ShieldCheck', 'ShieldOff', 'CheckCircle2', 'ShieldAlert', 'RotateCw'];
 const icons = Object.fromEntries(names.map(name => {
   if (!lucide.icons[name]) throw Error(`Missing Lucide icon: ${name}`);
   return [name, lucide.icons[name]];
